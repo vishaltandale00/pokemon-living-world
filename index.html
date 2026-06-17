@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Living Kanto</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #0b0f14; height: 100%; overflow: hidden;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #app { display: flex; align-items: center; justify-content: center; height: 100%; }
+    canvas { image-rendering: pixelated; }
+    .overlay {
+      position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+      background: rgba(4, 8, 12, 0.82); z-index: 50; color: #dfe9f3;
+    }
+    .overlay.open { display: flex; }
+    .panel {
+      background: #101820; border: 2px solid #2e4a63; border-radius: 10px;
+      padding: 24px 28px; width: 560px; max-height: 80vh; overflow-y: auto;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+    }
+    .panel h2 { margin: 0 0 14px; color: #7fd4ff; font-size: 17px; letter-spacing: 1px; }
+    .panel label { display: block; font-size: 12px; color: #8fa8bd; margin: 12px 0 4px; }
+    .panel input, .panel select {
+      width: 100%; box-sizing: border-box; background: #0b1118; color: #e6f1fa;
+      border: 1px solid #34516b; border-radius: 6px; padding: 8px 10px; font-size: 13px;
+      font-family: inherit;
+    }
+    .panel .row { display: flex; gap: 10px; margin-top: 18px; }
+    .panel button {
+      flex: 1; background: #1c344f; color: #cfe7fb; border: 1px solid #3c6286;
+      border-radius: 6px; padding: 9px 0; font-size: 13px; cursor: pointer; font-family: inherit;
+    }
+    .panel button:hover { background: #28486c; }
+    .panel button.danger { background: #4f1c1c; border-color: #864040; color: #fbd2cf; }
+    .panel button.danger:hover { background: #6c2828; }
+    .panel .hint { font-size: 11px; color: #5d7890; margin-top: 10px; line-height: 1.5; }
+    #journal-list { font-size: 12px; line-height: 1.7; color: #c4d6e6; }
+    #journal-list .day { color: #7fd4ff; }
+    #llm-status { font-size: 11px; margin-top: 8px; }
+    #llm-status.ok { color: #7dde9a; }
+    #llm-status.bad { color: #e08f8f; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div class="overlay" id="settings-overlay">
+    <div class="panel">
+      <h2>SETTINGS — LLM DIRECTOR</h2>
+      <label>API Base URL</label>
+      <input id="cfg-base" placeholder="https://openrouter.ai/api/v1" />
+      <label>API Key</label>
+      <input id="cfg-key" type="password" placeholder="sk-..." />
+      <label>Model</label>
+      <input id="cfg-model" placeholder="openai/gpt-5.5" />
+      <div id="llm-status"></div>
+      <div class="row">
+        <button id="cfg-save">Save</button>
+        <button id="cfg-test">Test Connection</button>
+        <button id="cfg-close">Close</button>
+      </div>
+      <div class="row">
+        <button class="danger" id="cfg-newgame">⚠ New Game (wipe world)</button>
+      </div>
+      <div class="hint">
+        The model is the world's Dungeon Master: it writes NPC dialogue, decides daily world
+        developments, and reacts to your reputation. Without a key the world falls back to a
+        simpler rule-based engine — still playable, less alive.<br/><br/>
+        Keys: Arrows/WASD move · SPACE talk/advance · 1-3 choose · T end day · J journal · ESC settings
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="journal-overlay">
+    <div class="panel">
+      <h2>WORLD JOURNAL</h2>
+      <div id="journal-list"></div>
+      <div class="row"><button id="journal-close">Close</button></div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+// OpenAI-compatible chat client with JSON-schema structured outputs.
+// Config lives in localStorage so the player pastes their key in Settings.
+
+export interface LLMConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+const CFG_KEY = 'living-kanto-llm-cfg';
+
+export function getConfig(): LLMConfig {
+  try {
+    const raw = localStorage.getItem(CFG_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* fall through */ }
+  return { baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: 'openai/gpt-5.5' };
+}
+
+export function setConfig(cfg: LLMConfig) {
+  localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+}
+
+export function hasKey(): boolean { return getConfig().apiKey.trim().length > 0; }
+
+export async function chatJSON<T>(
+  system: string,
+  user: string,
+  schemaName: string,
+  schema: Record<string, unknown>,
+  maxTokens = 900,
+): Promise<T> {
+  const cfg = getConfig();
+  if (!cfg.apiKey) throw new Error('no-key');
+  const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      max_completion_tokens: maxTokens,
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: schemaName, strict: true, schema },
+      },
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    // Some OpenAI-compatible servers don't support json_schema; retry with json_object
+    if (res.status === 400 && /json_schema|response_format/i.test(body)) {
+      return chatJSONFallbackMode<T>(system, user, maxTokens);
+    }
+    throw new Error(`LLM HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content ?? '';
+  return JSON.parse(text) as T;
+}
+
+async function chatJSONFallbackMode<T>(system: string, user: string, maxTokens: number): Promise<T> {
+  const cfg = getConfig();
+  const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [
+        { role: 'system', content: system + '\nRespond ONLY with valid JSON matching the requested shape.' },
+        { role: 'user', content: user },
+      ],
+      max_completion_tokens: maxTokens,
+      response_format: { type: 'json_object' },
+    }),
+  });
+  if (!res.ok) throw new Error(`LLM HTTP ${res.status}`);
+  const data = await res.json();
+  return JSON.parse(data.choices?.[0]?.message?.content ?? '{}') as T;
+}
+
+export async function testConnection(): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const out = await chatJSON<{ pong: string }>(
+      'You are a connection test. Reply with JSON.',
+      'Say pong.',
+      'ping',
+      { type: 'object', properties: { pong: { type: 'string' } }, required: ['pong'], additionalProperties: false },
+      50,
+    );
+    return { ok: true, detail: `Connected — model replied: ${out.pong}` };
+  } catch (e) {
+    return { ok: false, detail: String((e as Error).message ?? e) };
+  }
+}

@@ -1,0 +1,12 @@
+# dependencies & build output
+node_modules/
+dist/
+
+# local tooling / session state
+.gstack/
+.playwright-mcp/
+.claude/settings.local.json
+
+# os / misc
+.DS_Store
+*.log

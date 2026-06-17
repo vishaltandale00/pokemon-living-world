@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Soulslike Battle Mock</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070a0d;
+      --panel: #10161c;
+      --line: #274358;
+      --text: #e8f2fb;
+      --muted: #7e97a8;
+      --gold: #e6c66a;
+      --red: #e45e58;
+      --green: #67d982;
+      --blue: #70b8ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 35%, #162029 0%, var(--bg) 58%);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: var(--text);
+    }
+
+    main {
+      height: 100%;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      gap: 10px;
+      padding: 16px;
+    }
+
+    .stage {
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    canvas {
+      width: min(100%, calc((100vh - 112px) * 16 / 9));
+      max-width: 1180px;
+      aspect-ratio: 16 / 9;
+      image-rendering: pixelated;
+      border: 2px solid #29465d;
+      background: #0d151a;
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.48);
+    }
+
+    .commands {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 150px));
+      justify-content: center;
+      gap: 8px;
+    }
+
+    button {
+      height: 42px;
+      border: 1px solid #385c78;
+      border-radius: 6px;
+      background: #132131;
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:hover { background: #1a3047; }
+    button:active { transform: translateY(1px); }
+
+    @media (max-width: 700px) {
+      main { padding: 8px; }
+      .commands { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      button { height: 46px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="stage" aria-label="Soulslike battle mock">
+      <canvas id="arena" width="960" height="540"></canvas>
+    </section>
+    <nav class="commands" aria-label="Combat commands">
+      <button data-action="light">Light Attack</button>
+      <button data-action="heavy">Heavy Attack</button>
+      <button data-action="dodge">Dodge</button>
+      <button data-action="special">Ember</button>
+    </nav>
+  </main>
+
+  <script>
+    const canvas = document.getElementById("arena");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width;
+    const H = canvas.height;
+
+    const keys = new Set();
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const now = () => performance.now();
+
+    const playerBase = {
+      x: 286, y: 296, r: 15,
+      hp: 100, hpMax: 100,
+      stamina: 100, staminaMax: 100,
+      focus: 0, focusMax: 100,
+      speed: 168,
+      vx: 0, vy: 0,
+      faceX: 1, faceY: 0,
+      dodgeMs: 0,
+      invulnMs: 0,
+      attack: null,
+      specialCd: 0,
+      deadMs: 0,
+    };
+
+    const bossBase = {
+      x: 662, y: 264, r: 38,
+      hp: 260, hpMax: 260,
+      posture: 0, postureMax: 100,
+      phase: 1,
+      state: "idle",
+      timer: 1000,
+      pattern: null,
+      target: { x: 0, y: 0 },
+      hitThisAction: false,
+      staggerMs: 0,
+    };
+
+    const state = {
+      player: structuredClone(playerBase),
+      boss: structuredClone(bossBase),
+      log: "Giovanni's Onix waits for the first mistake.",
+      deaths: 0,
+      wins: 0,
+      time: now(),
+      sparks: [],
+      shake: 0,
+    };
+
+    const patterns = {
+      sweep: {
+        name: "Tail Sweep",
+        tell: 620,
+        active: 180,
+        recover: 600,
+        range: 112,
+        damage: 17,
+        draw(kind) {
+          const alpha = kind === "active" ? 0.34 : 0.18;
+          ctx.fillStyle = `rgba(228, 94, 88, ${alpha})`;
+          ctx.beginPath();
+          ctx.arc(state.boss.x, state.boss.y, this.range, -0.35, Math.PI + 0.35);
+          ctx.lineTo(state.boss.x, state.boss.y);
+          ctx.closePath();
+          ctx.fill();
+        },
+        hits(p, b) {
+          return dist(p, b) < this.range && p.y > b.y - 76;
+        },
+      },
+      line: {
+        name: "Rock Line",
+        tell: 760,
+        active: 220,
+        recover: 520,
+        width: 56,
+        damage: 21,
+        draw(kind) {
+          const b = state.boss;
+          const t = state.boss.target;
+          const dx = t.x - b.x;
+          const dy = t.y - b.y;
+          const len = Math.max(1, Math.hypot(dx, dy));
+          const nx = -dy / len;
+          const ny = dx / len;
+          const far = 720;
+          const ex = b.x + (dx / len) * far;
+          const ey = b.y + (dy / len) * far;
+          const half = this.width / 2;
+          ctx.fillStyle = kind === "active" ? "rgba(228, 94, 88, 0.36)" : "rgba(230, 198, 106, 0.20)";
+          ctx.beginPath();
+          ctx.moveTo(b.x + nx * half, b.y + ny * half);
+          ctx.lineTo(ex + nx * half, ey + ny * half);
+          ctx.lineTo(ex - nx * half, ey - ny * half);
+          ctx.lineTo(b.x - nx * half, b.y - ny * half);
+          ctx.closePath();
+          ctx.fill();
+        },
+        hits(p, b) {
+          const t = state.boss.target;
+          const ax = t.x - b.x;
+          const ay = t.y - b.y;
+          const len = Math.max(1, Math.hypot(ax, ay));
+          const ux = ax / len;
+          const uy = ay / len;
+          const px = p.x - b.x;
+          const py = p.y - b.y;
+          const along = px * ux + py * uy;
+          const side = Math.abs(px * -uy + py * ux);
+          return along > -20 && along < 720 && side < this.width / 2 + p.r;
+        },
+      },
+      slam: {
+        name: "Burrow Slam",
+        tell: 900,
+        active: 190,
+        recover: 720,
+        radius: 82,
+        damage: 28,
+        draw(kind) {
+          const t = state.boss.target;
+          ctx.fillStyle = kind === "active" ? "rgba(228, 94, 88, 0.40)" : "rgba(228, 94, 88, 0.16)";
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, this.radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(230, 198, 106, 0.55)";
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        },
+        hits(p) {
+          return Math.hypot(p.x - state.boss.target.x, p.y - state.boss.target.y) < this.radius + p.r;
+        },
+      },
+      ring: {
+        name: "Stone Ring",
+        tell: 720,
+        active: 240,
+        recover: 580,
+        inner: 70,
+        outer: 154,
+        damage: 19,
+        draw(kind) {
+          const b = state.boss;
+          ctx.fillStyle = kind === "active" ? "rgba(228, 94, 88, 0.34)" : "rgba(112, 184, 255, 0.18)";
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, this.outer, 0, Math.PI * 2);
+          ctx.arc(b.x, b.y, this.inner, 0, Math.PI * 2, true);
+          ctx.fill();
+        },
+        hits(p, b) {
+          const d = dist(p, b);
+          return d > this.inner - p.r && d < this.outer + p.r;
+        },
+      },
+    };
+
+    function resetAttempt(text) {
+      state.player = structuredClone(playerBase);
+      state.boss = structuredClone(bossBase);
+      state.log = text || "Giovanni's Onix waits for the first mistake.";
+      state.sparks.length = 0;
+      state.shake = 0;
+    }
+
+    function addSpark(x, y, color, count) {
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 60 + Math.random() * 140;
+        state.sparks.push({
+          x, y,
+          vx: Math.cos(a) * sp,
+          vy: Math.sin(a) * sp,
+          life: 280 + Math.random() * 220,
+          color,
+        });
+      }
+    }
+
+    function spendStamina(amount) {
+      const p = state.player;
+      if (p.stamina < amount || p.deadMs > 0) return false;
+      p.stamina -= amount;
+      return true;
+    }
+
+    function actionLight() {
+      const p = state.player;
+      if (p.attack || p.dodgeMs > 0 || !spendStamina(12)) return;
+      p.attack = { type: "light", ms: 180, total: 180, range: 72, damage: 8, posture: 9, hit: false };
+      state.log = "Charmander cuts in with a fast claw.";
+    }
+
+    function actionHeavy() {
+      const p = state.player;
+      if (p.attack || p.dodgeMs > 0 || !spendStamina(30)) return;
+      p.attack = { type: "heavy", ms: 410, total: 410, range: 92, damage: 19, posture: 26, hit: false };
+      state.log = "Charmander commits to a heavy strike.";
+    }
+
+    function actionDodge() {
+      const p = state.player;
+      if (p.dodgeMs > 0 || p.attack || !spendStamina(24)) return;
+      p.dodgeMs = 260;
+      p.invulnMs = 210;
+      const mx = inputX();
+      const my = inputY();
+      const len = Math.hypot(mx, my) || 1;
+      p.vx = (mx || p.faceX) / len * 460;
+      p.vy = (my || p.faceY) / len * 460;
+      state.log = "Charmander slips through the danger.";
+    }
+
+    function actionSpecial() {
+      const p = state.player;
+      if (p.attack || p.dodgeMs > 0 || p.specialCd > 0 || !spendStamina(22)) return;
+      p.specialCd = 4200;
+      p.attack = { type: "ember", ms: 260, total: 260, range: 190, damage: 15, posture: 17, hit: false };
+      state.log = "Ember flares across the arena.";
+    }
+
+    function inputX() {
+      return (keys.has("arrowright") || keys.has("d") ? 1 : 0) -
+        (keys.has("arrowleft") || keys.has("a") ? 1 : 0);
+    }
+
+    function inputY() {
+      return (keys.has("arrowdown") || keys.has("s") ? 1 : 0) -
+        (keys.has("arrowup") || keys.has("w") ? 1 : 0);
+    }
+
+    function updatePlayer(dt) {
+      const p = state.player;
+      if (p.deadMs > 0) {
+        p.deadMs -= dt;
+        if (p.deadMs <= 0) resetAttempt("You rise at the shrine. Giovanni waits.");
+        return;
+      }
+
+      p.specialCd = Math.max(0, p.specialCd - dt);
+      p.invulnMs = Math.max(0, p.invulnMs - dt);
+      p.stamina = clamp(p.stamina + dt * 0.026, 0, p.staminaMax);
+
+      if (p.dodgeMs > 0) {
+        p.dodgeMs -= dt;
+        p.x += p.vx * dt / 1000;
+        p.y += p.vy * dt / 1000;
+        p.vx *= 0.90;
+        p.vy *= 0.90;
+      } else if (!p.attack) {
+        const mx = inputX();
+        const my = inputY();
+        const len = Math.hypot(mx, my);
+        if (len > 0) {
+          p.faceX = mx / len;
+          p.faceY = my / len;
+          p.x += p.faceX * p.speed * dt / 1000;
+          p.y += p.faceY * p.speed * dt / 1000;
+        }
+      }
+
+      if (p.attack) {
+        p.attack.ms -= dt;
+        const b = state.boss;
+        const activeStart = p.attack.total * 0.35;
+        const activeEnd = p.attack.total * 0.78;
+        const elapsed = p.attack.total - p.attack.ms;
+        if (!p.attack.hit && elapsed >= activeStart && elapsed <= activeEnd) {
+          const reach = p.attack.range + p.r + b.r;
+          const forward = ((b.x - p.x) * p.faceX + (b.y - p.y) * p.faceY);
+          const withinArc = p.attack.type === "ember" || forward > -10;
+          if (dist(p, b) < reach && withinArc && b.staggerMs >= 0) {
+            const mult = b.staggerMs > 0 ? 1.4 : 1;
+            b.hp = clamp(b.hp - p.attack.damage * mult, 0, b.hpMax);
+            b.posture = clamp(b.posture + p.attack.posture, 0, b.postureMax);
+            p.focus = clamp(p.focus + 9 + p.attack.posture * 0.25, 0, p.focusMax);
+            p.attack.hit = true;
+            addSpark(b.x - b.r * 0.45, b.y, p.attack.type === "ember" ? "#ff9b48" : "#e8f2fb", 12);
+            state.log = b.staggerMs > 0 ? "Punish window. The hit lands clean." : "Onix absorbs the hit but its posture cracks.";
+            if (b.posture >= b.postureMax && b.staggerMs <= 0) {
+              b.posture = 0;
+              b.staggerMs = 1450;
+              b.state = "stagger";
+              b.timer = b.staggerMs;
+              b.pattern = null;
+              state.log = "Onix breaks posture. The boss is open.";
+            }
+          }
+        }
+        if (p.attack.ms <= 0) p.attack = null;
+      }
+
+      p.x = clamp(p.x, 84, W - 84);
+      p.y = clamp(p.y, 92, H - 78);
+    }
+
+    function choosePattern() {
+      const b = state.boss;
+      const p = state.player;
+      const close = dist(p, b) < 140;
+      const phaseTwo = b.hp < b.hpMax * 0.5;
+      const pool = close ? ["sweep", "slam", phaseTwo ? "ring" : "line"] : ["line", "slam", "line"];
+      const key = pool[Math.floor(Math.random() * pool.length)];
+      b.pattern = patterns[key];
+      b.target = { x: p.x, y: p.y };
+      b.state = "tell";
+      b.timer = b.pattern.tell;
+      b.hitThisAction = false;
+      state.log = `Onix signals ${b.pattern.name}.`;
+    }
+
+    function updateBoss(dt) {
+      const b = state.boss;
+      const p = state.player;
+      if (b.hp <= 0 || p.deadMs > 0) return;
+      b.phase = b.hp < b.hpMax * 0.5 ? 2 : 1;
+
+      if (b.staggerMs > 0) {
+        b.staggerMs -= dt;
+        b.timer = b.staggerMs;
+        if (b.staggerMs <= 0) {
+          b.state = "idle";
+          b.timer = 580;
+          state.log = "Onix recovers its guard.";
+        }
+        return;
+      }
+
+      b.timer -= dt;
+      if (b.state === "idle") {
+        if (b.timer <= 0) choosePattern();
+        return;
+      }
+
+      if (b.state === "tell" && b.timer <= 0) {
+        b.state = "active";
+        b.timer = b.pattern.active;
+        b.hitThisAction = false;
+        state.shake = 8;
+      } else if (b.state === "active") {
+        if (!b.hitThisAction && b.pattern.hits(p, b) && p.invulnMs <= 0) {
+          p.hp = clamp(p.hp - b.pattern.damage, 0, p.hpMax);
+          b.hitThisAction = true;
+          addSpark(p.x, p.y, "#e45e58", 16);
+          state.log = `${b.pattern.name} connects. Heal nothing. Learn the timing.`;
+          if (p.hp <= 0) {
+            state.deaths++;
+            p.deadMs = 1500;
+            state.log = "Charmander falls back. Nothing is lost.";
+          }
+        }
+        if (b.timer <= 0) {
+          b.state = "recover";
+          b.timer = b.pattern.recover;
+        }
+      } else if (b.state === "recover" && b.timer <= 0) {
+        b.state = "idle";
+        b.timer = b.phase === 2 ? 420 : 680;
+        b.pattern = null;
+      }
+    }
+
+    function updateSparks(dt) {
+      for (let i = state.sparks.length - 1; i >= 0; i--) {
+        const s = state.sparks[i];
+        s.life -= dt;
+        s.x += s.vx * dt / 1000;
+        s.y += s.vy * dt / 1000;
+        s.vx *= 0.95;
+        s.vy *= 0.95;
+        if (s.life <= 0) state.sparks.splice(i, 1);
+      }
+      state.shake = Math.max(0, state.shake - dt * 0.04);
+    }
+
+    function maybeWin() {
+      if (state.boss.hp > 0) return;
+      state.wins++;
+      const count = state.deaths;
+      resetAttempt(`Giovanni yields after ${count} fall${count === 1 ? "" : "s"}. No coin was lost.`);
+      state.deaths = 0;
+    }
+
+    function bar(x, y, w, h, ratio, color, label) {
+      ctx.fillStyle = "rgba(5, 8, 12, 0.76)";
+      ctx.fillRect(x - 2, y - 2, w + 4, h + 22);
+      ctx.strokeStyle = "#29465d";
+      ctx.strokeRect(x - 2, y - 2, w + 4, h + 22);
+      ctx.fillStyle = "#27323a";
+      ctx.fillRect(x, y + 16, w, h);
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y + 16, Math.max(0, w * ratio), h);
+      ctx.fillStyle = "#e8f2fb";
+      ctx.font = "13px monospace";
+      ctx.fillText(label, x, y + 10);
+    }
+
+    function drawArena() {
+      ctx.save();
+      const ox = state.shake ? (Math.random() - 0.5) * state.shake : 0;
+      const oy = state.shake ? (Math.random() - 0.5) * state.shake : 0;
+      ctx.translate(ox, oy);
+
+      const grd = ctx.createLinearGradient(0, 0, W, H);
+      grd.addColorStop(0, "#16262a");
+      grd.addColorStop(0.48, "#203c38");
+      grd.addColorStop(1, "#1b2730");
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = "#172a27";
+      for (let y = 74; y < H - 44; y += 32) {
+        for (let x = 58; x < W - 58; x += 32) {
+          ctx.fillRect(x, y, 18, 18);
+        }
+      }
+
+      ctx.strokeStyle = "#516b5c";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(58, 70, W - 116, H - 126);
+
+      ctx.fillStyle = "rgba(230, 198, 106, 0.12)";
+      ctx.beginPath();
+      ctx.ellipse(W / 2, H / 2 + 28, 306, 158, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawTelegraph() {
+      const b = state.boss;
+      if (!b.pattern || (b.state !== "tell" && b.state !== "active")) return;
+      b.pattern.draw(b.state);
+    }
+
+    function drawBoss() {
+      const b = state.boss;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      if (b.staggerMs > 0) ctx.rotate(Math.sin(now() / 70) * 0.035);
+
+      ctx.fillStyle = "#9e9381";
+      ctx.beginPath();
+      ctx.ellipse(0, 8, 64, 38, -0.08, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#d4c7aa";
+      ctx.lineWidth = 4;
+      ctx.stroke();
+
+      ctx.fillStyle = "#655f59";
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.ellipse(i * 22, 4 + Math.abs(i) * 4, 18, 30, -0.18 * i, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = "#151719";
+      ctx.fillRect(18, -6, 8, 5);
+      ctx.fillStyle = b.phase === 2 ? "#e45e58" : "#e6c66a";
+      ctx.fillRect(20, -5, 4, 3);
+      ctx.restore();
+    }
+
+    function drawPlayer() {
+      const p = state.player;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      if (p.invulnMs > 0) ctx.globalAlpha = 0.58 + Math.sin(now() / 35) * 0.22;
+
+      if (p.attack) {
+        const a = Math.atan2(p.faceY, p.faceX);
+        const reach = p.attack.range;
+        ctx.fillStyle = p.attack.type === "ember" ? "rgba(255, 131, 62, 0.34)" : "rgba(232, 242, 251, 0.18)";
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, reach, a - 0.46, a + 0.46);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      ctx.fillStyle = "#e36c38";
+      ctx.beginPath();
+      ctx.arc(0, 0, p.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#ffd086";
+      ctx.beginPath();
+      ctx.arc(p.faceX * 7, p.faceY * 7 - 2, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#ffb04d";
+      ctx.beginPath();
+      ctx.moveTo(-12, 8);
+      ctx.lineTo(-28, 18);
+      ctx.lineTo(-16, 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawSparks() {
+      for (const s of state.sparks) {
+        ctx.globalAlpha = clamp(s.life / 360, 0, 1);
+        ctx.fillStyle = s.color;
+        ctx.fillRect(s.x - 2, s.y - 2, 4, 4);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function drawHud() {
+      const p = state.player;
+      const b = state.boss;
+      bar(28, 24, 250, 10, p.hp / p.hpMax, "#67d982", `Charmander ${Math.ceil(p.hp)}/${p.hpMax}`);
+      bar(28, 64, 190, 8, p.stamina / p.staminaMax, "#e6c66a", "Stamina");
+      bar(28, 100, 156, 8, p.focus / p.focusMax, "#70b8ff", "Focus");
+
+      bar(W - 340, 24, 300, 10, b.hp / b.hpMax, "#e45e58", `Giovanni's Onix ${Math.ceil(b.hp)}/${b.hpMax}`);
+      bar(W - 286, 64, 220, 8, b.posture / b.postureMax, "#d8d0bf", "Posture");
+
+      ctx.fillStyle = "rgba(5, 8, 12, 0.72)";
+      ctx.fillRect(28, H - 72, W - 56, 44);
+      ctx.strokeStyle = "#29465d";
+      ctx.strokeRect(28, H - 72, W - 56, 44);
+      ctx.fillStyle = "#e8f2fb";
+      ctx.font = "16px monospace";
+      ctx.fillText(state.log, 44, H - 44);
+
+      ctx.fillStyle = "#7e97a8";
+      ctx.font = "12px monospace";
+      const special = p.specialCd > 0 ? `Ember ${Math.ceil(p.specialCd / 1000)}s` : "Ember ready";
+      ctx.fillText(`Falls ${state.deaths}  Wins ${state.wins}  ${special}`, W - 260, H - 90);
+    }
+
+    function frame(t) {
+      const dt = Math.min(34, t - state.time);
+      state.time = t;
+      updatePlayer(dt);
+      updateBoss(dt);
+      updateSparks(dt);
+      maybeWin();
+
+      ctx.clearRect(0, 0, W, H);
+      drawArena();
+      drawTelegraph();
+      drawBoss();
+      drawPlayer();
+      drawSparks();
+      ctx.restore();
+      drawHud();
+      requestAnimationFrame(frame);
+    }
+
+    window.addEventListener("keydown", (e) => {
+      keys.add(e.key.toLowerCase());
+      if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(e.key.toLowerCase())) e.preventDefault();
+      if (e.key.toLowerCase() === "j") actionLight();
+      if (e.key.toLowerCase() === "k") actionHeavy();
+      if (e.key.toLowerCase() === "l") actionDodge();
+      if (e.key.toLowerCase() === "i") actionSpecial();
+    });
+
+    window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+
+    document.querySelectorAll("button[data-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const action = button.dataset.action;
+        if (action === "light") actionLight();
+        if (action === "heavy") actionHeavy();
+        if (action === "dodge") actionDodge();
+        if (action === "special") actionSpecial();
+      });
+    });
+
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

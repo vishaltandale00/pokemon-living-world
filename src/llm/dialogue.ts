@@ -82,6 +82,7 @@ export async function npcDialogue(npc: NPC, playerSaid: string | null): Promise<
 You are NOT an assistant. Stay in character completely. Speak 1-2 SHORT sentences (max ~30 words total) — terse and vivid, like a Game Boy text box.
 Reference real world history when relevant. Your attitude toward the player colors your tone.
 Offer 2-3 player choices that are meaningfully DIFFERENT (kind/neutral/bold/criminal as fits the situation), and when the moment allows it, ALWAYS include at least one genuinely BOLD or hostile option. Each choice label must be SHORT — under 8 words, a first-person action like "Challenge them" or "Walk away".
+Do not offer choices that directly loot or steal from the current room (for example "Steal from lab"). Room theft must happen through direct object interaction in the world. If the player might steal, offer a setup choice instead: distract, deceive, lure away, or ask about security. For Prof. Oak in his lab, use a Lugia/Route 1 sighting as the distraction.
 repEffects per choice must be small integers (-5..5, usually 0-2 axes nonzero). attitudeDelta -10..10 — give insulting, threatening, or openly hostile choices a clearly negative attitudeDelta (-6..-10), never a token one.
 Set startsBattle=true when the player's choice is an outright threat, a challenge, or an insult to your face AND you have a party (${npc.party.length} monsters) — a real character fights back, they don't just stand there and take it.
 If you have a PENDING OFFER, weave it into your line and include a choice with acceptsOffer set to that offer id; otherwise acceptsOffer must be null.`;
@@ -96,7 +97,7 @@ Respond as ${npc.name} with your line and the player's choices.`;
     // real-time conversation runs on the FAST tier (falls back to the smart model if unset)
     const turn = await chatJSON<DialogueTurn>(system, user, 'dialogue_turn', DIALOGUE_SCHEMA as unknown as Record<string, unknown>, 900, 'fast');
     // sanitize + keep lengths bounded so the dialogue box stays readable
-    turn.choices = (turn.choices ?? []).slice(0, 3).map(c => ({
+    turn.choices = (turn.choices ?? []).slice(0, 3).map(c => sanitizeChoice(npc, {
       label: clip(String(c.label), 64),
       repEffects: {
         league: clampInt(c.repEffects?.league), rocket: clampInt(c.repEffects?.rocket),
@@ -128,4 +129,19 @@ function clip(s: string, max: number): string {
 function clampInt(v: unknown): number {
   const n = Math.trunc(Number(v) || 0);
   return Math.max(-5, Math.min(5, n));
+}
+
+function sanitizeChoice(npc: NPC, c: DialogueTurn['choices'][number]): DialogueTurn['choices'][number] {
+  const theft = /\b(steal|rob|loot|pocket|take)\b/i.test(c.label);
+  const labTarget = /\b(lab|oak|starter|pok[eé] ?ball|supply|research|cabinet|case|machine)\b/i.test(c.label);
+  if (npc.id === 'oak' && npc.map === 'int:viridian_lab' && theft && labTarget) {
+    return {
+      label: 'Mention Route 1 sighting',
+      repEffects: { league: 0, rocket: 1, civic: -1, research: 0 },
+      attitudeDelta: -2,
+      startsBattle: false,
+      acceptsOffer: null,
+    };
+  }
+  return c;
 }

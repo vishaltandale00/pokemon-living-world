@@ -177,8 +177,9 @@ export class BattleRenderer {
     g.imageSmoothingEnabled = false; // crisp pixel-art sprites (restored by g.restore())
     if (img && img.complete && img.width) {
       const w = img.width, h = img.height;
-      g.drawImage(img, -w / 2, -h + 8); // feet near origin
-      if (b.flash > 0 || b.state === 'active') { g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = b.flash > 0 ? b.flash / 360 : 0.12 + 0.06 * Math.sin(time * 0.04); g.drawImage(img, -w / 2, -h + 8); g.restore(); }
+      const feetY = h > 200 ? -h * 0.78 : -h + 8; // AI frames have ~20% bottom padding; base sprite sits at its bottom
+      g.drawImage(img, -w / 2, feetY); // feet near origin
+      if (b.flash > 0 || b.state === 'active') { g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = b.flash > 0 ? b.flash / 360 : 0.12 + 0.06 * Math.sin(time * 0.04); g.drawImage(img, -w / 2, feetY); g.restore(); }
     } else {
       g.fillStyle = '#7c736a'; g.beginPath(); g.ellipse(0, -20, 26, 30, 0, 0, TAU); g.fill();
     }
@@ -210,7 +211,8 @@ export class BattleRenderer {
     g.scale((p.dir || 1) * sq * (1 - breath) * (1 + 0.2 * hurt) * spr, (1 / sq) * (1 + breath) * (1 - 0.2 * hurt) * spr);
     g.imageSmoothingEnabled = false; // crisp pixel-art sprites (restored by g.restore())
     if (img && img.complete && img.width) {
-      g.drawImage(img, -img.width / 2, -img.height + 6);
+      const feetY = img.height > 200 ? -img.height * 0.78 : -img.height + 6;
+      g.drawImage(img, -img.width / 2, feetY);
     } else {
       g.fillStyle = '#d9701f'; g.beginPath(); g.ellipse(0, -14, 12, 15, 0, 0, TAU); g.fill();
     }

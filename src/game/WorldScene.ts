@@ -13,6 +13,8 @@ import { makeMonster, SPECIES } from '../world/monsters';
 import type { NPC } from '../world/types';
 import { GamepadPoller, type PadFrame } from './gamepad';
 
+type PromptChoice = { label: string; action: () => void };
+
 // Main overworld scene: grid movement, NPC interaction, LLM dialogue with
 // choices, day ticks, wild encounters in tall grass, map transitions.
 
@@ -29,6 +31,7 @@ export class WorldScene extends Phaser.Scene {
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyT!: Phaser.Input.Keyboard.Key;
   private keyJ!: Phaser.Input.Keyboard.Key;
+  private keyEnter!: Phaser.Input.Keyboard.Key;
   private keys123: Phaser.Input.Keyboard.Key[] = [];
   private moving = false;
   private hud!: Phaser.GameObjects.Text;
@@ -49,6 +52,7 @@ export class WorldScene extends Phaser.Scene {
   private dlgBusy = false;
   private dlgSel = 0;
   private dlgChoiceTexts: Phaser.GameObjects.Text[] = [];
+  private promptActions: Array<() => void> = [];
 
   // controller
   private pad = new GamepadPoller();
@@ -75,6 +79,7 @@ export class WorldScene extends Phaser.Scene {
     this.keySpace = this.input.keyboard!.addKey('SPACE');
     this.keyT = this.input.keyboard!.addKey('T');
     this.keyJ = this.input.keyboard!.addKey('J');
+    this.keyEnter = this.input.keyboard!.addKey('ENTER');
     this.keys123 = ['ONE', 'TWO', 'THREE'].map(k => this.input.keyboard!.addKey(k));
     // main.ts owns the ESC key: it asks whether an in-game modal is open and,
     // if so, tells us to close it instead of opening Settings (no key race)
@@ -411,6 +416,9 @@ export class WorldScene extends Phaser.Scene {
     if (!near && isSolid(this.mapData.tiles, p.x + dx, p.y + dy, this.mapData.w, this.mapData.h)) {
       near = npcAt(p.x + 2 * dx, p.y + 2 * dy); // talk across a service counter
     }
+    // In Oak's lab, facing a visible prop should interact with that prop before
+    // the forgiving adjacent-NPC fallback grabs Oak instead.
+    if (!near && this.tryLabObjectInteract(p.x + dx, p.y + dy, p.x + 2 * dx, p.y + 2 * dy)) return;
     // fallback: any 4-adjacent NPC (forgiving overworld interaction)
     if (!near) {
       near = localNpcs.find(n => Math.abs(n.x - p.x) + Math.abs(n.y - p.y) === 1);
@@ -431,7 +439,9 @@ export class WorldScene extends Phaser.Scene {
           !isSolid(this.mapData.tiles, p.x, n.y, this.mapData.w, this.mapData.h);
       });
     }
-    if (!near) return;
+    if (!near) {
+      return;
+    }
     if (near.id.startsWith('nurse')) { this.healAtCenter(near.name); return; }
     if (near.id.startsWith('clerk')) { this.talkClerk(near.name); return; }
     this.openDialogue(near);
@@ -509,7 +519,215 @@ export class WorldScene extends Phaser.Scene {
     this.shopBox = undefined;
   }
 
+  private tryLabObjectInteract(x1: number, y1: number, x2: number, y2: number): boolean {
+    if (this.mapId !== 'int:viridian_lab') return false;
+    const obj = this.labObjectAt(x1, y1) ?? this.labObjectAt(x2, y2);
+    if (!obj) return false;
+    if (obj === 'terminal') this.openLabTerminalPrompt();
+    else if (obj === 'journals') this.openLabJournalPrompt();
+    else if (obj === 'specimen') this.openSpecimenCasePrompt();
+    else this.openLabSupplyPrompt();
+    return true;
+  }
+
+  private labObjectAt(x: number, y: number): 'terminal' | 'journals' | 'specimen' | 'supplies' | null {
+    if (y >= 1 && y <= 3 && x >= 2 && x <= 5) return 'terminal';
+    if (y >= 1 && y <= 3 && x >= 8 && x <= 12) return 'journals';
+    if (x >= 0 && x <= 2 && y >= 4 && y <= 6) return 'specimen';
+    if ((y === 8 && ((x >= 0 && x <= 4) || (x >= 8 && x <= 12))) || (y >= 4 && y <= 5 && x >= 8 && x <= 10)) return 'supplies';
+    return null;
+  }
+
+  private promptChoice(label: string): DialogueChoice {
+    return {
+      label,
+      repEffects: { league: 0, rocket: 0, civic: 0, research: 0 },
+      attitudeDelta: 0,
+      startsBattle: false,
+      acceptsOffer: null,
+    };
+  }
+
+  private openPrompt(text: string, choices: PromptChoice[]) {
+    this.dlgNpc = null;
+    this.dlgBusy = false;
+    this.promptActions = choices.map(c => c.action);
+    this.dlgTurn = { npcLine: text, choices: choices.map(c => this.promptChoice(c.label)) };
+    this.drawDialogue(text, this.dlgTurn.choices);
+  }
+
+  private oakIsInLab(): boolean {
+    return world.state.npcs.oak?.map === 'int:viridian_lab';
+  }
+
+  private openLabJournalPrompt() {
+    const readAlready = !!world.state.player.flags['read_oak_lugia_notes'];
+    this.openPrompt(
+      readAlready
+        ? 'Oak\'s field journals are open to the same underlined note: "Credible Route 1 Lugia reports override all lab work."'
+        : 'Oak\'s field journals obsess over Lugia migration. One note is underlined twice: "If Route 1 reports silver wings, leave immediately."',
+      [
+        {
+          label: readAlready ? 'Review the clue' : 'Study Lugia notes',
+          action: () => {
+            if (!world.state.player.flags['read_oak_lugia_notes']) {
+              world.state.player.flags['read_oak_lugia_notes'] = true;
+              world.addRep({ research: 1 }, 'studying Oak\'s Lugia notes');
+              world.save();
+              this.updateHud();
+            }
+            this.openPrompt('The journals make the opening obvious: Oak trusts urgent Lugia leads more than locked cabinets.', [
+              { label: 'Use field terminal', action: () => this.openLabTerminalPrompt() },
+              { label: 'Check cabinets', action: () => this.openSpecimenCasePrompt() },
+              { label: 'Step away', action: () => this.closeDialogue() },
+            ]);
+          },
+        },
+        { label: 'Use field terminal', action: () => this.openLabTerminalPrompt() },
+        { label: 'Step away', action: () => this.closeDialogue() },
+      ],
+    );
+  }
+
+  private openLabTerminalPrompt() {
+    if (this.oakIsInLab()) {
+      this.openPrompt(
+        'The field terminal is logged into Oak\'s Ranger alert network. A blank report form is ready: location, witness, sighting notes.',
+        [
+          { label: 'Send Route 1 alert', action: () => this.lureOakFromLab('a Ranger terminal report') },
+          { label: 'Read Lugia file', action: () => this.openLabJournalPrompt() },
+          { label: 'Step away', action: () => this.closeDialogue() },
+        ],
+      );
+      return;
+    }
+    this.openPrompt(
+      'The terminal blinks: "OAK DISPATCHED TO ROUTE 1." The lab is quiet except for humming machines and unlocked drawers.',
+      [
+        { label: 'Check cabinets', action: () => this.openSpecimenCasePrompt() },
+        { label: 'Check supplies', action: () => this.openLabSupplyPrompt() },
+        { label: 'Step away', action: () => this.closeDialogue() },
+      ],
+    );
+  }
+
+  private openSpecimenCasePrompt() {
+    if (world.state.player.flags['lab_stole_prototype_kit']) {
+      this.openPrompt('The specimen case has an empty outline where Oak\'s prototype field kit used to sit.', [
+        { label: 'Check supplies', action: () => this.openLabSupplyPrompt() },
+        { label: 'Step away', action: () => this.closeDialogue() },
+      ]);
+      return;
+    }
+    if (this.oakIsInLab()) {
+      this.openPrompt(
+        'The specimen case is locked, but not well. Oak is close enough to hear the latch; his Lugia notes hint at a better opening.',
+        [
+          { label: 'Find a distraction', action: () => this.openLabTerminalPrompt() },
+          { label: 'Read nearby notes', action: () => this.openLabJournalPrompt() },
+          { label: 'Step away', action: () => this.closeDialogue() },
+        ],
+      );
+      return;
+    }
+    this.openPrompt(
+      'With Oak gone, the specimen case latch gives under your thumb. Inside is a prototype field kit tagged for the northern survey.',
+      [
+        { label: 'Take field kit', action: () => this.stealPrototypeKit() },
+        { label: 'Leave it', action: () => this.closeDialogue() },
+      ],
+    );
+  }
+
+  private openLabSupplyPrompt() {
+    if (world.state.player.flags['lab_stole_supplies']) {
+      this.openPrompt('The supply drawer is mostly cleaned out. A fresh inventory card will make the missing medicine hard to hide.', [
+        { label: 'Check cabinets', action: () => this.openSpecimenCasePrompt() },
+        { label: 'Step away', action: () => this.closeDialogue() },
+      ]);
+      return;
+    }
+    if (this.oakIsInLab()) {
+      this.openPrompt(
+        'The supply drawer holds travel medicine, but Oak keeps looking over whenever the handle rattles.',
+        [
+          { label: 'Find a distraction', action: () => this.openLabTerminalPrompt() },
+          { label: 'Step away', action: () => this.closeDialogue() },
+        ],
+      );
+      return;
+    }
+    this.openPrompt(
+      'The drawer slides open without a squeak. Two Potions sit behind a clipboard marked "field survey only."',
+      [
+        { label: 'Pocket Potions', action: () => this.stealLabSupplies() },
+        { label: 'Leave them', action: () => this.closeDialogue() },
+      ],
+    );
+  }
+
+  private lureOakFromLab(source: string) {
+    const oak = world.state.npcs.oak;
+    if (!oak || oak.map !== 'int:viridian_lab') {
+      this.openPrompt('Oak is already out chasing the Lugia lead. The lab is unattended.', [
+        { label: 'Check cabinets', action: () => this.openSpecimenCasePrompt() },
+        { label: 'Check supplies', action: () => this.openLabSupplyPrompt() },
+        { label: 'Step away', action: () => this.closeDialogue() },
+      ]);
+      return;
+    }
+    oak.map = 'route1';
+    oak.x = 12;
+    oak.y = 6;
+    oak.attitude = Math.max(-100, oak.attitude - 3);
+    world.state.player.flags['oak_lured_from_lab'] = true;
+    world.addRep({ rocket: 2, civic: -1, research: -1 }, `sending Oak away with ${source}`);
+    world.logEvent('lab_distraction', 'A Route 1 Lugia alert pulled Prof. Oak out of his field lab.');
+    world.save();
+    this.renderNpcs();
+    this.updateHud();
+    this.openPrompt('Oak grabs his field kit and hurries north. The lab door swings shut behind him; the cabinets are no longer watched.', [
+      { label: 'Inspect specimen case', action: () => this.openSpecimenCasePrompt() },
+      { label: 'Check supplies', action: () => this.openLabSupplyPrompt() },
+      { label: 'Step away', action: () => this.closeDialogue() },
+    ]);
+  }
+
+  private stealPrototypeKit() {
+    if (this.oakIsInLab()) { this.openSpecimenCasePrompt(); return; }
+    if (world.state.player.flags['lab_stole_prototype_kit']) { this.openSpecimenCasePrompt(); return; }
+    const p = world.state.player;
+    p.items.pokeball = (p.items.pokeball ?? 0) + 3;
+    p.items.potion = (p.items.potion ?? 0) + 1;
+    p.flags['lab_stole_prototype_kit'] = true;
+    world.addRep({ rocket: 4, civic: -2, research: -2 }, 'stealing Oak\'s prototype field kit');
+    world.logEvent('theft', 'Player stole a prototype field kit from Oak\'s Field Lab while Oak chased a false Lugia lead.');
+    world.save();
+    this.updateHud();
+    this.openPrompt('You take the prototype kit: 3 Poké Balls and 1 Potion. The empty case looks louder than the alarm ever could.', [
+      { label: 'Check supplies', action: () => this.openLabSupplyPrompt() },
+      { label: 'Step away', action: () => this.closeDialogue() },
+    ]);
+  }
+
+  private stealLabSupplies() {
+    if (this.oakIsInLab()) { this.openLabSupplyPrompt(); return; }
+    if (world.state.player.flags['lab_stole_supplies']) { this.openLabSupplyPrompt(); return; }
+    const p = world.state.player;
+    p.items.potion = (p.items.potion ?? 0) + 2;
+    p.flags['lab_stole_supplies'] = true;
+    world.addRep({ rocket: 2, civic: -1, research: -1 }, 'pocketing medicine from Oak\'s lab');
+    world.logEvent('theft', 'Player pocketed Potions from Oak\'s Field Lab while Oak was away.');
+    world.save();
+    this.updateHud();
+    this.openPrompt('You pocket 2 Potions. Somewhere outside, Oak is still chasing silver wings.', [
+      { label: 'Check cabinets', action: () => this.openSpecimenCasePrompt() },
+      { label: 'Step away', action: () => this.closeDialogue() },
+    ]);
+  }
+
   private async openDialogue(npc: NPC) {
+    this.promptActions = [];
     this.dlgNpc = npc;
     this.dlgTurn = null;
     this.dlgBusy = true;
@@ -565,7 +783,7 @@ export class WorldScene extends Phaser.Scene {
     this.highlightDlg();
 
     if (hint) {
-      c.add(this.add.text(W - PAD, H - 15, choices.length ? '1-3 or (A) pick · (B) leave' : 'SPACE/(A) close', {
+      c.add(this.add.text(W - PAD, H - 15, choices.length ? '1-3 / ENTER pick · SPACE/(B) leave' : 'SPACE/(A) close', {
         fontFamily: 'monospace', fontSize: '9px', color: '#5d7890',
       }).setOrigin(1, 0));
     }
@@ -579,9 +797,9 @@ export class WorldScene extends Phaser.Scene {
     // B / SPACE = leave or close
     if (Phaser.Input.Keyboard.JustDown(this.keySpace) || gp.B) { this.closeDialogue(); return; }
     if (n) {
-      if (gp.up) { this.dlgSel = (this.dlgSel - 1 + n) % n; this.highlightDlg(); }
-      if (gp.down) { this.dlgSel = (this.dlgSel + 1) % n; this.highlightDlg(); }
-      if (gp.A) { this.pickChoice(this.dlgSel); return; }
+      if (Phaser.Input.Keyboard.JustDown(this.cursors.up!) || gp.up) { this.dlgSel = (this.dlgSel - 1 + n) % n; this.highlightDlg(); }
+      if (Phaser.Input.Keyboard.JustDown(this.cursors.down!) || gp.down) { this.dlgSel = (this.dlgSel + 1) % n; this.highlightDlg(); }
+      if (Phaser.Input.Keyboard.JustDown(this.keyEnter) || gp.A) { this.pickChoice(this.dlgSel); return; }
     } else if (gp.A) { this.closeDialogue(); return; }
     this.keys123.forEach((key, i) => {
       if (Phaser.Input.Keyboard.JustDown(key)) this.pickChoice(i);
@@ -593,6 +811,12 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private async pickChoice(i: number) {
+    if (this.promptActions.length) {
+      const action = this.promptActions[i];
+      if (action) action();
+      return;
+    }
+
     const npc = this.dlgNpc, turn = this.dlgTurn;
     if (!npc || !turn || !turn.choices[i]) return;
     const ch = turn.choices[i];
@@ -607,6 +831,11 @@ export class WorldScene extends Phaser.Scene {
     const attBefore = npc.attitude;
     npc.attitude = Math.max(-100, Math.min(100, npc.attitude + ch.attitudeDelta));
     const attAfter = npc.attitude;
+
+    if (this.isOakLureChoice(npc, ch.label)) {
+      this.lureOakFromLab('a Route 1 Lugia claim');
+      return;
+    }
 
     if (ch.acceptsOffer) {
       // match strictly by id; only fall back to fromNpc if exactly one offer exists
@@ -657,9 +886,16 @@ export class WorldScene extends Phaser.Scene {
     world.save();
   }
 
+  private isOakLureChoice(npc: NPC, label: string): boolean {
+    return npc.id === 'oak' &&
+      npc.map === 'int:viridian_lab' &&
+      /(?:route 1|lugia).*(?:sighting|alert|report|claim)|(?:sighting|alert|report).*(?:route 1|lugia)/i.test(label);
+  }
+
   private closeDialogue() {
     this.dlgBox?.destroy();
     this.dlgBox = undefined;
+    this.promptActions = [];
     if (this.dlgNpc) this.npcSprites.get(this.dlgNpc.id)?.setDepth(9); // restore normal layering
     this.dlgNpc = null;
     this.dlgTurn = null;
@@ -696,6 +932,29 @@ export class WorldScene extends Phaser.Scene {
     this.time.delayedCall(result ? 3200 : 0, () => this.applyStory());
   }
 
+  private resolveOakLabDistractionAfterNight(): string | null {
+    const oak = world.state.npcs.oak;
+    const p = world.state.player;
+    if (!oak || !p.flags['oak_lured_from_lab'] || oak.map === 'int:viridian_lab') return null;
+
+    oak.map = 'int:viridian_lab';
+    oak.x = 6;
+    oak.y = 9;
+
+    const stoleFromLab = p.flags['lab_stole_prototype_kit'] || p.flags['lab_stole_supplies'];
+    if (stoleFromLab && !p.flags['oak_discovered_lab_theft']) {
+      p.flags['oak_discovered_lab_theft'] = true;
+      oak.attitude = Math.max(-100, oak.attitude - 12);
+      world.logEvent('theft_discovered', 'Prof. Oak returned from Route 1 and discovered supplies missing from his field lab.');
+      world.save();
+      return 'Prof. Oak returned from Route 1 and found the missing lab supplies.';
+    }
+
+    world.logEvent('world_news', 'Prof. Oak returned from an unconfirmed Route 1 Lugia lead.');
+    world.save();
+    return 'Prof. Oak returned from the Route 1 Lugia lead.';
+  }
+
   // ——— day tick ———
   private async endDay() {
     if (this.ticking) return; // no overlapping ticks
@@ -706,10 +965,11 @@ export class WorldScene extends Phaser.Scene {
     try {
       const res = await runWorldTick();
       const story = this.applyStory(true); // collect without bannering; fold in below
+      const lab = this.resolveOakLabDistractionAfterNight();
       this.renderMap();
       this.syncPlayerSprite();
       this.updateHud();
-      const lines = [...res.headlines.map(h => '· ' + h), ...story.map(s => '★ ' + s)];
+      const lines = [...res.headlines.map(h => '· ' + h), ...(lab ? ['· ' + lab] : []), ...story.map(s => '★ ' + s)];
       const head = lines.length ? lines.join('\n') : '· A quiet night.';
       this.showBanner(`☀ Day ${world.state.day}${res.usedLLM ? '' : ' (offline director)'}\n${head}`, 9000);
     } finally {

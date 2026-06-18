@@ -73,7 +73,8 @@ export function vfxEl(type: ActionEl): 'fire' | 'water' | 'grass' | 'electric' |
 // super-effective / resisted / immune pressure.
 export function toActionKit(m: MonsterInstance): ActionKit {
   const s = SPECIES[m.speciesId];
-  const speed = clamp(135 + (m.spd - 18) * 2.2, 122, 205);
+  // gentle slope + wide caps that saturate late, so species still feel distinct past ~Lv30
+  const speed = clamp(128 + (m.spd - 14) * 1.7, 120, 230);
   // Specials: derive 2-3 ranged options so the U/I/O binds are all real (decision
   // D2) WITHOUT touching the world's move data. Damage scales with the owner's atk
   // so a typed special stays relevant at every level (not flat power*0.5).
@@ -100,10 +101,10 @@ export function toActionKit(m: MonsterInstance): ActionKit {
     scale: 1,
     hp: m.maxHp,
     speed,
-    dodgeCost: clamp(26 - Math.floor(m.spd / 4), 16, 26),
-    dodgeVel: 470 + (speed - 130) * 1.4,
+    dodgeCost: clamp(28 - Math.floor(m.spd / 5), 14, 28),
+    dodgeVel: 460 + (speed - 128) * 1.4,
     dodgeEl: s.type1 === 'water' ? 'water' : null,
-    regen: 0.034 + Math.min(0.022, m.spd * 0.0006),
+    regen: 0.03 + Math.min(0.03, m.spd * 0.0007),
     light: {
       name: 'Strike', el: s.type1, tEl: null,
       dmg: Math.max(4, Math.round(m.atk * 0.55)),
@@ -148,9 +149,18 @@ const ROLE_HP_MULT: Partial<Record<RoleId, number>> = {
   rocket_grunt: 2.2, trainer: 2.3, gym_challenger: 2.4, ranger: 2.4, wanderer: 2.1,
 };
 
-export function toBossKit(opponent: MonsterInstance, opts: { role?: RoleId; wild?: boolean } = {}): BossKit {
+export function toBossKit(opponent: MonsterInstance, opts: { role?: RoleId; wild?: boolean; playerLevel?: number } = {}): BossKit {
   const s = SPECIES[opponent.speciesId];
-  const mult = opts.wild ? 1.55 : (opts.role ? (ROLE_HP_MULT[opts.role] ?? 2.4) : 2.4);
+  const mult = opts.wild ? 1.2 : (opts.role ? (ROLE_HP_MULT[opts.role] ?? 2.4) : 2.4);
+  // Couple to the player↔boss level gap so an over/under-leveled player still gets a
+  // fair fight (not a trivial wall or a slog), instead of scaling off the opponent alone.
+  // Wild mons stay snappy: over-leveling them should make the fight quick, not beefier.
+  const lfRaw = opts.playerLevel ? opts.playerLevel / opponent.level : 1;
+  const lf = opts.wild ? clamp(lfRaw, 0.7, 1.15) : clamp(lfRaw, 0.65, 1.7);
+  // Compress the 4×-varying species base HP toward a level baseline so time-to-kill
+  // doesn't swing wildly between, say, a Lapras and a Rattata of the same level.
+  const lvlBaselineHp = Math.floor((55 * opponent.level) / 20) + opponent.level + 16;
+  const normHp = opponent.maxHp * 0.6 + lvlBaselineHp * 0.4;
   return {
     name: s.name,
     dexId: s.dexId,
@@ -159,9 +169,9 @@ export function toBossKit(opponent: MonsterInstance, opts: { role?: RoleId; wild
     type2: s.type2,
     level: opponent.level,
     roleLabel: opts.wild ? 'Wild' : (opts.role ? (ROLE_LABEL[opts.role] ?? 'Trainer') : 'Trainer'),
-    hpPool: Math.round(opponent.maxHp * mult),
+    hpPool: Math.round(normHp * mult * lf),
     maxPosture: Math.round(80 + opponent.def * 0.6),
-    atkBase: opponent.atk,
+    atkBase: Math.round(opponent.atk * clamp(lf, 0.85, 1.4)),
     radius: 46,
   };
 }

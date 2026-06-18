@@ -98,7 +98,7 @@ export class ActionBattleScene extends Phaser.Scene {
     const lead = this.playerParty[this.playerIdx];
     const opp = this.enemyParty[0];
     const intro = this.npc ? `${this.npc.name} challenges you!` : `A wild ${SPECIES[opp.speciesId].name} appears!`;
-    this.engine = new ActionEngine(toActionKit(lead), toBossKit(opp, { role: this.role, wild: this.isWild }), intro);
+    this.engine = new ActionEngine(toActionKit(lead), toBossKit(opp, { role: this.role, wild: this.isWild, playerLevel: lead.level }), intro);
     this.engine.isWildBattle = this.isWild;
     this.engine.p.hp = this.engine.p.hpShown = Math.max(1, Math.min(lead.hp, this.engine.p.maxHp));
 
@@ -253,7 +253,7 @@ export class ActionBattleScene extends Phaser.Scene {
         this.enemyIdx++;
         const next = this.enemyParty[this.enemyIdx];
         this.preloadSprite(SPECIES[next.speciesId].dexId);
-        eng.swapBoss(toBossKit(next, { role: this.role, wild: this.isWild }), `${this.npc?.name ?? 'Foe'} sends out ${SPECIES[next.speciesId].name}!`);
+        eng.swapBoss(toBossKit(next, { role: this.role, wild: this.isWild, playerLevel: this.playerParty[this.playerIdx].level }), `${this.npc?.name ?? 'Foe'} sends out ${SPECIES[next.speciesId].name}!`);
       } else {
         this.finish(this.npc ? 'npc_win' : 'wild_win', { npcId: this.npc?.id, wildSpeciesId: defeated.speciesId });
       }

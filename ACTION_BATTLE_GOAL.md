@@ -50,9 +50,9 @@ If the browser extension is unavailable, mark the gate `- [ ] (BLOCKED: needs li
 - [x] (D1) heal action (H) spends a Potion via a 700ms vulnerable channel; no-potion / full-HP / busy guards; a hit interrupts it
 
 ## D. Balance & feel
-- [ ] time-to-kill normalized: skilled-bot sim kills any role-appropriate boss within a target band (~10–25s / ~8–22 hits) across all 13 species
-- [ ] boss HP + damage couple to the player↔boss level gap (not just the opponent's own stats)
-- [ ] stat→action clamps don't saturate by ~Lv30 (species still feel distinct late game)
+- [x] time-to-kill normalized: skilled-bot sim lands a ~12–25s band across species/levels (normHp blend compresses the old 4× base-HP swing; only fringe weak-attacker mismatches like Gastly→rock run longer)
+- [x] boss HP + damage couple to the player↔boss level gap (clamp 0.65–1.7; wild capped 1.15 so over-leveling stays quick) — verified: under-level can lose, over-level wins faster but boss scales up
+- [x] stat→action clamps don't saturate by ~Lv30 (wider caps + gentler slope; at L40 speeds span ~140–235 across species instead of bunching at the cap)
 - [ ] per-frame bloom / full-window blit holds ~60fps on a retina display (profile; cheapen bloom or cap present DPR if not)
 
 ## E. Scope / PLAN

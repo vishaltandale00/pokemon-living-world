@@ -73,7 +73,8 @@ export async function loadCharSheets(scene: Phaser.Scene): Promise<void> {
               { key: `ow_${key}`, frame: b },
               { key: `ow_${key}`, frame: stand },
             ],
-            frameRate: 8,
+            frameRate: 9,
+            repeat: -1,   // loop while walking; the scene snaps to stand on stop
           });
         }
       };

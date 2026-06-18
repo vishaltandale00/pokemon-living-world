@@ -136,12 +136,16 @@ export class BattleRenderer {
     if (b.state === 'active' && b.move) { const k = clamp(b.timer / b.move.active, 0, 1); const hd = norm(b.target.x - b.x, b.target.y - b.y); const d = (1 - Math.pow(1 - k, 3)) * 18; lunge = { x: hd.x * d, y: hd.y * d }; }
     else if (b.state === 'tell') { const k = clamp(1 - b.timer / (b.tellTotal || 1), 0, 1); const hd = norm(b.target.x - b.x, b.target.y - b.y); const d = Math.pow(k, 2) * -12; lunge = { x: hd.x * d, y: hd.y * d }; }
     const scale = 2.3 * (broken ? 0.94 : 1);
-    g.save(); g.translate(b.x + lunge.x, b.y + lunge.y);
+    const hit = clamp(b.flash / 120, 0, 1);                       // 1 right after taking a hit
+    const rec = norm(b.x - eng.p.x, b.y - eng.p.y);               // recoil away from the player
+    g.save(); g.translate(b.x + lunge.x + rec.x * hit * 7, b.y + lunge.y + rec.y * hit * 7);
     const bob = Math.sin(time * 0.0024) * 2.5;
     g.translate(0, bob);
     const fdir = b.face < 0 ? -1 : 1;
-    const sq = b.state === 'active' ? 1.08 : 1;
-    g.scale(fdir * scale * sq, scale / sq);
+    const atk = b.state === 'active' ? 1.08 : 1;                  // attack stretch
+    const breath = 0.035 * Math.sin(time * 0.0026);              // idle breathing
+    // volume-ish squash: hit flattens wide, breath rises tall, attack stretches forward
+    g.scale(fdir * scale * atk * (1 - breath) * (1 + 0.22 * hit), scale / atk * (1 + breath) * (1 - 0.22 * hit));
     if (img && img.complete && img.width) {
       const w = img.width, h = img.height;
       g.drawImage(img, -w / 2, -h + 8); // feet near origin
@@ -165,9 +169,12 @@ export class BattleRenderer {
     if (p.dodge > 0 && p.inv > 0) sq = 1.2;
     if (p.atk && (p.atk.kind === 'light' || p.atk.kind === 'heavy')) { const e = clamp(1 - p.atk.t / p.atk.total, 0, 1); if (e < 0.32) { const k = e / 0.32; lean = -6 * k; sq = 1 - 0.1 * k; } else if (e < 0.5) { const k = (e - 0.32) / 0.18; lean = -6 + 22 * k; sq = 1 + 0.16 * k; } else { const k = (e - 0.5) / 0.5; lean = 16 * (1 - k); sq = 1 + 0.16 * (1 - k); } }
     if (p.moving && !p.atk) lean += 4;
-    g.translate(lean * (p.dir || 1), bob);
+    const hurt = clamp(p.hurt / 240, 0, 1);                                  // 1 right after being hit
+    const rec = norm(p.x - eng.b.x, p.y - eng.b.y);                          // recoil away from the boss
+    const breath = (!p.atk && p.dodge <= 0) ? 0.03 * Math.sin(t * 2.2) : 0;  // breathe only when not busy
+    g.translate(lean * (p.dir || 1) + rec.x * hurt * 6, bob + rec.y * hurt * 6);
     if (p.inv > 0) g.globalAlpha = 0.55 + 0.25 * Math.sin(time * 0.04);
-    g.scale((p.dir || 1) * sq * sc, (1 / sq) * sc);
+    g.scale((p.dir || 1) * sq * (1 - breath) * (1 + 0.2 * hurt) * sc, (1 / sq) * (1 + breath) * (1 - 0.2 * hurt) * sc);
     if (img && img.complete && img.width) {
       g.drawImage(img, -img.width / 2, -img.height + 6);
     } else {

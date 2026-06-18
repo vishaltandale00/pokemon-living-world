@@ -277,21 +277,36 @@ export class WorldScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyT) || gp.back) { this.endDay(); return; }
     if (Phaser.Input.Keyboard.JustDown(this.keyJ) || gp.Y) { (window as any).showJournal?.(); return; }
 
-    let dx = 0, dy = 0;
-    if (this.cursors.left.isDown || this.wasd.A.isDown || gp.mx < -0.5) dx = -1;
-    else if (this.cursors.right.isDown || this.wasd.D.isDown || gp.mx > 0.5) dx = 1;
-    else if (this.cursors.up.isDown || this.wasd.W.isDown || gp.my < -0.5) dy = -1;
-    else if (this.cursors.down.isDown || this.wasd.S.isDown || gp.my > 0.5) dy = 1;
-    if (!dx && !dy) return;
+    const { dx, dy } = this.heldDir();
+    if (!dx && !dy) { this.stopWalk(); return; }
+    this.takeStep(dx, dy);
+  }
 
-    // update facing (even when blocked — like the real games)
+  // current held direction from keyboard or pad (first match wins)
+  private heldDir(): { dx: number; dy: number } {
+    const gp = this.padNow;
+    if (this.cursors.left.isDown || this.wasd.A.isDown || gp.mx < -0.5) return { dx: -1, dy: 0 };
+    if (this.cursors.right.isDown || this.wasd.D.isDown || gp.mx > 0.5) return { dx: 1, dy: 0 };
+    if (this.cursors.up.isDown || this.wasd.W.isDown || gp.my < -0.5) return { dx: 0, dy: -1 };
+    if (this.cursors.down.isDown || this.wasd.S.isDown || gp.my > 0.5) return { dx: 0, dy: 1 };
+    return { dx: 0, dy: 0 };
+  }
+
+  // after a step lands, immediately chain the next one if a direction is still
+  // held (continuous walking, legs keep cycling); otherwise settle to standing.
+  private continueOrStop() {
+    const { dx, dy } = this.heldDir();
+    if (dx || dy) this.takeStep(dx, dy);
+    else { this.moving = false; this.stopWalk(); }
+  }
+
+  private takeStep(dx: number, dy: number) {
     this.facing = dx < 0 ? 'left' : dx > 0 ? 'right' : dy < 0 ? 'up' : 'down';
     this.applyFacing();
 
     const p = world.state.player;
     const nx = p.x + dx, ny = p.y + dy;
 
-    // map exit?
     const exit = this.mapData.exits.find(e => e.x === nx && e.y === ny);
     if (exit) { this.transition(exit.toMap, exit.toX, exit.toY); return; }
 
@@ -299,34 +314,38 @@ export class WorldScene extends Phaser.Scene {
 
     // south-facing ledge: hop down over it (like the real games)
     if (isLedge(this.mapData.tiles, nx, ny)) {
-      if (dy !== 1) return;
       const ly = ny + 1;
-      if (isSolid(this.mapData.tiles, nx, ly, W, H) || isLedge(this.mapData.tiles, nx, ly)) return;
-      if (Object.values(world.state.npcs).some(n => n.map === this.mapId && n.x === nx && n.y === ly)) return;
+      if (dy !== 1 || isSolid(this.mapData.tiles, nx, ly, W, H) || isLedge(this.mapData.tiles, nx, ly) ||
+          Object.values(world.state.npcs).some(n => n.map === this.mapId && n.x === nx && n.y === ly)) {
+        this.moving = false; this.stopWalk(); return;
+      }
       this.moving = true;
       p.x = nx; p.y = ly;
       this.playWalkAnim();
       this.tweens.add({
         targets: this.playerSprite, x: this.px(nx), y: this.py(ly) + this.playerYOffset(),
         duration: 230, ease: 'Quad.easeOut',
-        onComplete: () => { this.moving = false; world.save(); },
+        onComplete: () => { world.save(); this.continueOrStop(); },
       });
       return;
     }
 
-    if (isSolid(this.mapData.tiles, nx, ny, W, H)) return;
-    if (Object.values(world.state.npcs).some(n => n.map === this.mapId && n.x === nx && n.y === ny)) return;
+    // blocked: face the wall but don't move, and settle to standing
+    if (isSolid(this.mapData.tiles, nx, ny, W, H) ||
+        Object.values(world.state.npcs).some(n => n.map === this.mapId && n.x === nx && n.y === ny)) {
+      this.moving = false; this.stopWalk(); return;
+    }
 
     this.moving = true;
     p.x = nx; p.y = ny;
     this.playWalkAnim();
     this.tweens.add({
-      targets: this.playerSprite, x: this.px(nx), y: this.py(ny) + this.playerYOffset(), duration: 110,
+      targets: this.playerSprite, x: this.px(nx), y: this.py(ny) + this.playerYOffset(), duration: 150,
       onComplete: () => {
-        this.moving = false;
         world.save();
-        // wild encounter in tall grass (overworld only)
-        if (this.mapData.tiles[ny][nx] === T.TALLGRASS && world.rngChance('encounter', 0.12)) this.startWildBattle();
+        // wild encounter in tall grass (overworld only) — battle takes over
+        if (this.mapData.tiles[ny][nx] === T.TALLGRASS && world.rngChance('encounter', 0.12)) { this.moving = false; this.startWildBattle(); return; }
+        this.continueOrStop();
       },
     });
   }
@@ -347,10 +366,13 @@ export class WorldScene extends Phaser.Scene {
   private playWalkAnim() {
     if (!this.usingSheets()) return;
     const dir = this.facing === 'right' ? 'left' : this.facing;
-    this.playerSprite.play(`ow_player_walk_${dir}`, true);
-    this.playerSprite.once('animationcomplete', () => {
-      this.playerSprite.setFrame(STAND_FRAME[this.facing]);
-    });
+    this.playerSprite.play(`ow_player_walk_${dir}`, true);   // loops; ignoreIfPlaying keeps it smooth across steps
+  }
+
+  private stopWalk() {
+    if (!this.usingSheets()) return;
+    this.playerSprite.anims.stop();
+    this.playerSprite.setFrame(STAND_FRAME[this.facing]);
   }
 
   private transition(toMap: string, toX: number, toY: number) {

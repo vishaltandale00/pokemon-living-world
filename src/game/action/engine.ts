@@ -58,7 +58,7 @@ export interface PlayerState {
   heal: { t: number; dur: number; amount: number } | null;
   cd: Record<string, number>; cdMax: Record<string, number>;
   refunded: Record<string, boolean>; regenLock: number;
-  combo: number; comboT: number; chain: number; dead: number; just: number;
+  combo: number; comboT: number; chain: number; dead: number; just: number; hurt: number;
 }
 interface PlayerAttack {
   kind: 'light' | 'heavy' | 'cone' | 'castpose';
@@ -91,7 +91,7 @@ function freshPlayer(kit: ActionKit): PlayerState {
     faceX: 1, faceY: 0, dir: 1, moving: false,
     dodge: 0, inv: 0, vx: 0, vy: 0, atk: null, heal: null,
     cd: { U: 0, I: 0, O: 0 }, cdMax: {}, refunded: { U: false, I: false, O: false }, regenLock: 0,
-    combo: 0, comboT: 0, chain: 0, dead: 0, just: 0,
+    combo: 0, comboT: 0, chain: 0, dead: 0, just: 0, hurt: 0,
   };
 }
 function freshBoss(kit: BossKit): BossState {
@@ -388,7 +388,7 @@ export class ActionEngine {
     n = Math.min(n, Math.ceil(p.maxHp * 0.55));
     if (p.hp - n <= 0 && p.hp > p.maxHp * 0.35) n = p.hp - 1;
     p.hp = clamp(p.hp - n, 0, p.maxHp); p.combo = 0; p.comboT = 0; p.chain = 0;
-    this.shake = 13; this.hitstop = 95; this.flash = 110; this.zoom = 1.06;
+    this.shake = 13; this.hitstop = 95; this.flash = 110; this.zoom = 1.06; p.hurt = 240;
     const k = norm(p.x - b.x, p.y - b.y); this.kickX = k.x * 11; this.kickY = k.y * 11;
     this.spark(p.x, p.y, '255,90,80', 16); this.ring(p.x, p.y, '255,90,80', 56); this.pulseText(p.x, p.y - 34, '-' + n, '255,90,80', 20);
     this.log = 'Hit. Read the next tell.';
@@ -400,7 +400,7 @@ export class ActionEngine {
     const p = this.p;
     if (this.winT > 0) { this.winT -= dt; if (this.winT <= 0) this.phase = 'boss_ko'; return; }
     if (p.dead) { p.dead -= dt; if (p.dead <= 0) this.phase = 'player_ko'; return; }
-    p.inv = Math.max(0, p.inv - dt); p.just = Math.max(0, p.just - dt); p.moving = false;
+    p.inv = Math.max(0, p.inv - dt); p.just = Math.max(0, p.just - dt); p.hurt = Math.max(0, p.hurt - dt); p.moving = false;
     for (const k of ['U', 'I', 'O']) p.cd[k] = Math.max(0, p.cd[k] - dt);
     if (p.regenLock > 0) p.regenLock -= dt;
     this.dodgeBuf = Math.max(0, this.dodgeBuf - dt); this.atkBuf = Math.max(0, this.atkBuf - dt);

@@ -280,7 +280,8 @@ export class BattleRenderer {
     // log + controls
     this.rr(g, 24, H - 30, W - 48, 22, 6); g.fillStyle = 'rgba(7,11,15,.82)'; g.fill(); g.strokeStyle = 'rgba(120,160,180,.3)'; g.lineWidth = 1; g.stroke();
     g.textAlign = 'left'; g.fillStyle = '#dfeaf0'; g.font = '12px ui-monospace, monospace'; g.fillText(eng.log, 36, H - 15);
-    g.textAlign = 'right'; g.fillStyle = '#7f97a6'; g.font = '10px ui-monospace, monospace'; g.fillText('WASD move · J light · K heavy · L dodge · I/U special', W - 36, H - 15); g.textAlign = 'left';
+    const ctl = 'WASD move · J light · K heavy · L dodge · I/U special' + (eng.isWildBattle ? ' · C catch · F flee' : '');
+    g.textAlign = 'right'; g.fillStyle = '#7f97a6'; g.font = '10px ui-monospace, monospace'; g.fillText(ctl, W - 36, H - 15); g.textAlign = 'left';
   }
   private drawSlot(g: CanvasRenderingContext2D, x: number, y: number, eng: ActionEngine, slot: string, name: string) {
     const cd = eng.p.cd[slot] || 0, cdmax = eng.p.cdMax[slot] || 3000; const ready = cd <= 0;

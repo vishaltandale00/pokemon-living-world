@@ -106,6 +106,7 @@ export class ActionEngine {
   groundFlash = 0; groundFlashX = 0; groundFlashY = 0;
   winT = 0; comboPop = 0;
   log = '';
+  isWildBattle = false;   // set by the scene; drives the catch/flee HUD hint
 
   fx: Particle[] = []; texts: FloatText[] = []; ghosts: Ghost[] = [];
   decals: Particle[] = []; shots: Shot[] = []; dust: Particle[] = [];

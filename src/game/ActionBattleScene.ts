@@ -38,6 +38,7 @@ export class ActionBattleScene extends Phaser.Scene {
   private onKeyUp!: (e: KeyboardEvent) => void;
   private onResize!: () => void;
   private ended = false;
+  private cleaned = false;
   private levelMsgs: string[] = [];
 
   constructor() { super('actionBattle'); }
@@ -63,6 +64,16 @@ export class ActionBattleScene extends Phaser.Scene {
   }
 
   create() {
+    this.cleaned = false;
+    // bail cleanly if there's nothing to fight (e.g. an NPC with an empty party,
+    // or no healthy player mon) — never throw inside create() with the world paused
+    if (!this.enemyParty.length || !this.playerParty.length || this.playerParty.every(m => m.hp <= 0)) {
+      this.ended = true;
+      this.time.delayedCall(0, () => { this.scene.stop(); this.scene.resume('world', { battleResult: '' }); });
+      return;
+    }
+    // register teardown FIRST so a later throw can never orphan the overlay / leak listeners
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
     this.dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
 
     // native render target
@@ -87,6 +98,7 @@ export class ActionBattleScene extends Phaser.Scene {
     const opp = this.enemyParty[0];
     const intro = this.npc ? `${this.npc.name} challenges you!` : `A wild ${SPECIES[opp.speciesId].name} appears!`;
     this.engine = new ActionEngine(toActionKit(lead), toBossKit(opp, { role: this.role, wild: this.isWild }), intro);
+    this.engine.isWildBattle = this.isWild;
     this.engine.p.hp = this.engine.p.hpShown = Math.max(1, Math.min(lead.hp, this.engine.p.maxHp));
 
     this.preloadSprite(SPECIES[lead.speciesId].dexId);
@@ -111,7 +123,10 @@ export class ActionBattleScene extends Phaser.Scene {
         case 'i': this.engine.onPress('I'); break;
         case 'o': this.engine.onPress('O'); break;
         case 'c': if (this.isWild) this.engine.onPress('catch'); break;
-        case 'f': case 'escape': if (this.isWild) this.engine.onPress('flee'); break;
+        case 'f': case 'escape':
+          if (this.isWild) this.engine.onPress('flee');
+          else this.engine.setLog("Can't run from a trainer battle!");
+          break;
       }
     };
     this.onKeyUp = (e: KeyboardEvent) => {
@@ -120,8 +135,6 @@ export class ActionBattleScene extends Phaser.Scene {
     };
     window.addEventListener('keydown', this.onKeyDown, true);
     window.addEventListener('keyup', this.onKeyUp, true);
-
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
   }
 
   private fitView() {
@@ -155,6 +168,7 @@ export class ActionBattleScene extends Phaser.Scene {
 
     this.engine.step(time);
     this.handleRequests();
+    if (this.ended) return;   // a catch/flee request may have ended the battle
     this.handlePhase();
     if (this.ended) return;
 
@@ -258,11 +272,15 @@ export class ActionBattleScene extends Phaser.Scene {
   }
 
   private cleanup() {
+    if (this.cleaned) return;
+    this.cleaned = true;
     if (this.onKeyDown) window.removeEventListener('keydown', this.onKeyDown, true);
     if (this.onKeyUp) window.removeEventListener('keyup', this.onKeyUp, true);
     if (this.onResize) window.removeEventListener('resize', this.onResize);
     this.view?.remove();
     this.held.clear();
     if (this.game?.input?.keyboard) this.game.input.keyboard.enabled = true;
+    // clear any keys the world might think are still held (it was paused while we ran)
+    (this.scene.get('world') as Phaser.Scene | null)?.input?.keyboard?.resetKeys();
   }
 }

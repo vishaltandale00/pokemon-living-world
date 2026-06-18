@@ -2,9 +2,9 @@
 // future) the menu battle funnel through here so badges / money / reputation /
 // role-slot claims / catches stay in exactly one place.
 //
-// Action-mode LOSS policy diverges from the old menu blackout on purpose: the
-// soulslike redesign takes NO money/XP/progress penalty on a wipe — your team is
-// healed and you wake at the nearest town, then step back in. (See PLAN.md.)
+// LOSS policy (decision D4): a real money penalty applies on ALL losses incl.
+// trainer + gym — the team is healed and you wake at the nearest town, minus
+// max(50, 15% of money). (This overrides PLAN.md's earlier no-penalty note.)
 import { world } from './store';
 import { SPECIES, makeMonster, xpToNext, type MonsterInstance } from './monsters';
 
@@ -91,12 +91,15 @@ export function applyBattleOutcome(outcome: BattleOutcome, ctx: OutcomeCtx = {})
   } else if (outcome === 'wild_fled') {
     msg = 'Got away safely.';
   } else if (outcome === 'blackout') {
-    // No penalty: heal the team and wake at the nearest town's Center.
+    // D4: penalty on all losses. Pay max(50, 15% of money), heal, wake at nearest town.
+    const penalty = Math.max(50, Math.floor(pl.money * 0.15));
+    pl.money = Math.max(0, pl.money - penalty);
     pl.party.forEach(m => { m.hp = m.maxHp; });
     const town = townOf(pl.map);
     pl.map = town; pl.x = 10; pl.y = 16;
-    world.logEvent('battle_lost', `Player's team was downed${ctx.npcId ? ` against ${world.state.npcs[ctx.npcId]?.name ?? ctx.npcId}` : ''} and recovered at ${world.state.towns[town]?.name ?? town}. No penalty.`);
-    msg = `Your team was downed — you came to at the ${world.state.towns[town]?.name ?? town} Center, fully healed. No coins or progress lost. Step back in when ready.`;
+    const where = world.state.towns[town]?.name ?? town;
+    world.logEvent('battle_lost', `Player's team was downed${ctx.npcId ? ` against ${world.state.npcs[ctx.npcId]?.name ?? ctx.npcId}` : ''} and paid ¥${penalty}, recovering at ${where}.`);
+    msg = `Your team was downed — you scrambled to the ${where} Center and paid ¥${penalty}. Your Pokémon were healed.`;
   }
 
   world.save();

@@ -61,4 +61,28 @@ export const GANG_BUNDLE: AuthoredBundle = {
   },
 };
 
-export const BUNDLES: AuthoredBundle[] = [WAREHOUSE_BUNDLE, GANG_BUNDLE];
+// SHAPE C — a rivalry escalating (relational, via a REIFIED carrier entity; the
+// ruling was: model abstract things AS entities, never magnitude-on-edges). HEAT
+// accretes on the carrier; thresholds walk it wary -> hostile -> feud -> war, the
+// one geometric beat being the rival fortifying a counter-base. Distinct again.
+export const RIVALRY_BUNDLE: AuthoredBundle = {
+  id: 'blue_rivalry',
+  describe: 'The feud with Blue escalates from wary to all-out war; at war he fortifies a counter-base.',
+  setup: (s) => {
+    s.entities['rivalry:blue'] = {
+      id: 'rivalry:blue', type: 'rivalry', tags: ['feud'], attrs: { stage: 'wary', rival: 'npc:blue' }, magnitude: 0,
+      relations: [{ to: 'player', rel: 'grievance', weight: 1 }, { to: 'npc:blue', rel: 'grievance', weight: 1 }],
+      thresholds: [
+        { channel: 'magnitude', level: 25, up: [{ t: 'setTag', e: { var: 'each' }, tag: 'hostile' }, { t: 'setAttr', e: { var: 'each' }, key: 'stage', v: 'hostile' }, { t: 'logEvent', key: 'rivalry_hostile' }], down: [] },
+        { channel: 'magnitude', level: 50, up: [{ t: 'setTag', e: { var: 'each' }, tag: 'feud' }, { t: 'setAttr', e: { var: 'each' }, key: 'stage', v: 'feud' }, { t: 'logEvent', key: 'rivalry_feud' }], down: [] },
+        { channel: 'magnitude', level: 75, up: [{ t: 'setTag', e: { var: 'each' }, tag: 'war' }, { t: 'setAttr', e: { var: 'each' }, key: 'stage', v: 'war' }, { t: 'placeBuildingValidly', map: 'viridian', kind: 'hideout', owner: 'blue', name: 'Rival Counter-Base' }, { t: 'logEvent', key: 'rivalry_war' }], down: [] },
+      ],
+    };
+  },
+  rules: [
+    { id: 'escalate', when: { t: 'exists', id: 'rivalry:blue' }, then: [{ t: 'addMagnitude', e: { id: 'rivalry:blue' }, delta: 6 }], throttleDays: 0 },
+  ],
+  thresholds: {},
+};
+
+export const BUNDLES: AuthoredBundle[] = [WAREHOUSE_BUNDLE, GANG_BUNDLE, RIVALRY_BUNDLE];

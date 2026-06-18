@@ -8,16 +8,17 @@ import { createSeedWorld } from './seed';
 import { runKernelTick, DEFAULT_CAP } from './kernel';
 import { structuralOps, reachabilityOK } from './structuralOps';
 import { storyCriticalIds } from './story';
-import { WAREHOUSE_BUNDLE, GANG_BUNDLE, type AuthoredBundle } from './bundles';
+import { WAREHOUSE_BUNDLE, GANG_BUNDLE, RIVALRY_BUNDLE, type AuthoredBundle } from './bundles';
+import { chatJSON, hasKey } from '../llm/client';
 import type { WorldState } from './types';
 
 interface Snap { day: number; mag: Record<string, number>; tags: Record<string, string[]>; locations: number; buildings: number; }
 interface Run { state: WorldState; snaps: Snap[]; failures: string[]; }
 
 function applyBundle(s: WorldState, b: AuthoredBundle) {
+  b.setup?.(s);   // setup first: may create carrier entities the thresholds attach to
   s.rules = b.rules;
   for (const [id, thr] of Object.entries(b.thresholds)) if (s.entities[id]) s.entities[id].thresholds = thr;
-  b.setup?.(s);
 }
 
 function runPlaythrough(seed: number, bundle: AuthoredBundle, days: number): Run {
@@ -59,7 +60,7 @@ function fingerprint(s: WorldState) {
 }
 
 interface Check { name: string; pass: boolean; detail: string }
-export interface P5Result { ok: boolean; checks: Check[]; warehouseArc: Snap[]; fingerprints: { warehouse: unknown; gang: unknown } }
+export interface P5Result { ok: boolean; checks: Check[]; warehouseArc: Snap[]; fingerprints: Record<string, unknown> }
 
 export function runP5Check(): P5Result {
   const checks: Check[] = [];
@@ -67,6 +68,7 @@ export function runP5Check(): P5Result {
 
   const wh = runPlaythrough(42, WAREHOUSE_BUNDLE, 16);
   const gang = runPlaythrough(42, GANG_BUNDLE, 14);
+  const riv = runPlaythrough(42, RIVALRY_BUNDLE, 14);
 
   // 1) the warehouse ARC materialized end to end
   const whE = wh.state.entities['bld:rocket_warehouse'];
@@ -77,18 +79,22 @@ export function runP5Check(): P5Result {
   add('warehouse arc: seized → fortified → compound → settlement + road', arc,
     `tags=[${whE.tags.join(',')}] playerBld=${playerBld} compoundMap=${!!wh.state.mapLayouts['compound']} road=${road}`);
 
-  // 2) invariants held on EVERY snapshot of BOTH runs
-  const allFail = [...wh.failures, ...gang.failures];
+  // also confirm the rivalry carrier escalated to war + fortified a counter-base
+  const rivE = riv.state.entities['rivalry:blue'];
+  const rivWar = !!rivE && rivE.tags.includes('war') && Object.values(riv.state.buildings).some(b => b.owner === 'blue');
+  add('rivalry arc: wary → war, rival fortifies a counter-base', rivWar, rivE ? `stage=${rivE.attrs.stage}` : 'no carrier');
+
+  // 2) invariants held on EVERY snapshot of ALL runs
+  const allFail = [...wh.failures, ...gang.failures, ...riv.failures];
   add('invariants: no-free-minting + reachability + persistence, every snapshot', allFail.length === 0, allFail.slice(0, 3).join(' | '));
 
-  // 3) DIVERGENCE: same seed, different bundle => structurally different worlds
-  const fpW = fingerprint(wh.state), fpG = fingerprint(gang.state);
-  const structurallyDifferent =
-    JSON.stringify(fpW.locations) !== JSON.stringify(fpG.locations) ||
-    JSON.stringify(fpW.newBuildings) !== JSON.stringify(fpG.newBuildings) ||
-    JSON.stringify(fpW.playerHoldings) !== JSON.stringify(fpG.playerHoldings);
-  add('divergence: same seed, different bundle → different STRUCTURE', structurallyDifferent,
-    `wh.loc=[${fpW.locations}] gang.loc=[${fpG.locations}] wh.holdings=${fpW.playerHoldings.length} gang.holdings=${fpG.playerHoldings.length}`);
+  // 3) DIVERGENCE: same seed, three different bundles => three structurally
+  // distinct worlds (all fingerprints mutually different).
+  const fpW = fingerprint(wh.state), fpG = fingerprint(gang.state), fpR = fingerprint(riv.state);
+  const distinct = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
+  const allDistinct = distinct(fpW, fpG) && distinct(fpW, fpR) && distinct(fpG, fpR);
+  add('divergence: same seed, 3 bundles → 3 structurally distinct worlds', allDistinct,
+    `wh.loc=[${fpW.locations}] gang.bld=${fpG.newBuildings.length} riv.bld=${fpR.newBuildings.length}`);
 
   // 4) determinism: same bundle + same seed => byte-identical final world
   const wh2 = runPlaythrough(42, WAREHOUSE_BUNDLE, 16);
@@ -104,5 +110,50 @@ export function runP5Check(): P5Result {
   const ok = checks.every(c => c.pass);
   // eslint-disable-next-line no-console
   console.log('[p5] ' + (ok ? 'ALL PASS' : 'FAIL') + '\n' + checks.map(c => `${c.pass ? '✓' : '✗'} ${c.name}${c.pass ? '' : ' — ' + c.detail}`).join('\n'));
-  return { ok, checks, warehouseArc: wh.snaps, fingerprints: { warehouse: fpW, gang: fpG } };
+  return { ok, checks, warehouseArc: wh.snaps, fingerprints: { warehouse: fpW, gang: fpG, rivalry: fpR } };
+}
+
+// ——— the QUALITATIVE half of the DoD: the LLM-judge rubric ———
+// Needs the user's in-game API key (Settings). It scores each bundle's rendered
+// timeline on the 4-pillar rubric's legibility + coherence, and judges whether
+// the runs genuinely diverged. (Claude never handles the key; the game holds it.)
+const JUDGE_SYSTEM = `You are an exacting reviewer of an emergent game engine. You receive the day-by-day
+TIMELINE of one authored playthrough (accreting magnitudes, tags, structures created). Score it:
+- legibility (1-5): from each day's state alone, can a viewer read what the current consequence IS?
+- coherence (1-5): does each beat follow causally from the prior — ONE escalating thread, not noise?
+- divergenceConfidence (1-5): how clearly is this a SPECIFIC world (a place, a faction, a feud), not generic?
+Return strict JSON.`;
+const JUDGE_SCHEMA = {
+  type: 'object',
+  properties: {
+    legibility: { type: 'integer' }, coherence: { type: 'integer' },
+    divergenceConfidence: { type: 'integer' }, notes: { type: 'string' },
+  },
+  required: ['legibility', 'coherence', 'divergenceConfidence', 'notes'],
+  additionalProperties: false,
+} as const;
+
+export async function runP5Judge(): Promise<Record<string, unknown>> {
+  if (!hasKey()) return { ran: false, reason: 'No API key set. Open Settings, add your key, then re-run __p5Judge().' };
+  const runs: [string, AuthoredBundle, number][] = [
+    ['warehouse', WAREHOUSE_BUNDLE, 16], ['gang', GANG_BUNDLE, 14], ['rivalry', RIVALRY_BUNDLE, 14],
+  ];
+  const scored: Record<string, unknown>[] = [];
+  for (const [name, b, days] of runs) {
+    const r = runPlaythrough(42, b, days);
+    const timeline = r.snaps.map(s =>
+      `Day ${s.day}: ${Object.entries(s.mag).map(([k, v]) => `${k}=${v}`).join(', ') || '(quiet)'} | tags ${JSON.stringify(s.tags)} | locations ${s.locations} buildings ${s.buildings}`).join('\n');
+    try {
+      const sc = await chatJSON<{ legibility: number; coherence: number; divergenceConfidence: number; notes: string }>(
+        JUDGE_SYSTEM, `BUNDLE: ${b.describe}\n\nTIMELINE:\n${timeline}`, 'p5_judge', JUDGE_SCHEMA as unknown as Record<string, unknown>, 500);
+      const norm = (sc.legibility + sc.coherence + sc.divergenceConfidence) / 15;
+      scored.push({ name, ...sc, normalized: Math.round(norm * 100) / 100 });
+    } catch (e) { scored.push({ name, error: String(e) }); }
+  }
+  const normalized = scored.filter(s => typeof s.normalized === 'number').map(s => s.normalized as number);
+  const overall = normalized.length ? normalized.reduce((a, b) => a + b, 0) / normalized.length : 0;
+  const pass = overall >= 0.80 && normalized.every(n => n >= 0.65);
+  // eslint-disable-next-line no-console
+  console.log('[p5-judge] overall', overall.toFixed(2), pass ? 'PASS (>=0.80, no pillar <0.65)' : 'below bar', scored);
+  return { ran: true, overall: Math.round(overall * 100) / 100, pass, scored };
 }

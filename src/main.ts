@@ -96,8 +96,12 @@ $('journal-close').onclick = closeJournal;
 (window as any).__kernelCheck = runKernelCheck;
 // P4 simulation harness — window.harness = { observe, act, snapshot }.
 installHarness();
-// P5 eval — run `__p5Check()` in the console (mechanical DoD gates + divergence).
-import('./world/p5Check').then(m => { (window as any).__p5Check = m.runP5Check; });
+// P5 eval — `__p5Check()` runs the mechanical DoD gates + divergence (no key);
+// `__p5Judge()` runs the qualitative 4-pillar rubric (needs the in-game API key).
+import('./world/p5Check').then(m => {
+  (window as any).__p5Check = m.runP5Check;
+  (window as any).__p5Judge = m.runP5Judge;
+});
 // P3 data-home probe — runs in the GAME's module context (shares the real
 // `world` + `buildMap`), so it's immune to console dynamic-import instancing.
 // Non-destructive: injects a throwaway runtime location + connection, checks

@@ -154,7 +154,14 @@ export interface WorldState {
   entities: EntityRegistry;      // derived from structs in P1a; tick-owned from P2 (see world/entity.ts)
   // ——— kernel runtime (P2): persisted so a half-grown world resumes identically ———
   kernel: KernelState;
+  // ——— structural-op data homes (P3): runtime geometry the ops write ———
+  connections: Connection[];               // edges wireConnection lays; merged into buildMap exits
+  mapLayouts: Record<string, string[]>;    // runtime ASCII layouts for createLocation'd map nodes
 }
+
+// A walkable edge between two overworld tiles (bidirectional pairs are stored as
+// two Connections). Persisted so generated roads/links survive a reload.
+export interface Connection { fromMap: string; fromX: number; fromY: number; toMap: string; toX: number; toY: number; }
 
 // Per-tick/per-day runtime the kernel carries IN the save (reload-deterministic).
 export interface KernelState {

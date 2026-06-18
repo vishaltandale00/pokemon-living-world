@@ -122,6 +122,8 @@ export function createSeedWorld(seed = 1): WorldState {
     pendingOffers: [],
     entities: {},
     kernel: { lastFired: {}, channelDay: 0, channelUsed: {}, deferred: [] },
+    connections: [],
+    mapLayouts: {},
   };
   // P1a: derive the kernel Entity substrate from the seed structs.
   state.entities = buildEntitiesFromWorld(state);

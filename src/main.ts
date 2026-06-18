@@ -7,7 +7,7 @@ import { getConfig, setConfig, testConnection } from './llm/client';
 import { world } from './world/store';
 import { runDeterminismCheck } from './world/determinismCheck';
 import { runKernelCheck } from './world/kernelCheck';
-import { MAP_W, MAP_H, TILE } from './game/maps';
+import { MAP_W, MAP_H, TILE, T, buildMap } from './game/maps';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -93,6 +93,25 @@ $('journal-close').onclick = closeJournal;
 (window as any).__determinismCheck = runDeterminismCheck;
 // P2 kernel contract checks — run `__kernelCheck()` in the console.
 (window as any).__kernelCheck = runKernelCheck;
+// P3 data-home probe — runs in the GAME's module context (shares the real
+// `world` + `buildMap`), so it's immune to console dynamic-import instancing.
+// Non-destructive: injects a throwaway runtime location + connection, checks
+// buildMap consumes both, then cleans up.
+(window as any).__p3Probe = () => {
+  const L: string[] = [];
+  for (let y = 0; y < MAP_H; y++) { let r = ''; for (let x = 0; x < MAP_W; x++) r += (y === 0 || y === MAP_H - 1 || x === 0 || x === MAP_W - 1) ? '#' : (x === 12 ? '=' : '.'); L.push(r); }
+  world.state.mapLayouts['__probe'] = L;
+  world.state.connections.push({ fromMap: 'pewter', fromX: 12, fromY: 1, toMap: '__probe', toX: 12, toY: 18 });
+  const ember = buildMap('__probe');
+  const pewter = buildMap('pewter');
+  const result = {
+    usedRuntimeLayout: ember.tiles[1][1] === T.GRASS && ember.tiles[1][12] === T.PATH,
+    pewterExitToProbe: pewter.exits.some(e => e.toMap === '__probe'),
+  };
+  delete world.state.mapLayouts['__probe'];
+  world.state.connections = world.state.connections.filter(c => c.toMap !== '__probe');
+  return result;
+};
 
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));

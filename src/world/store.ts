@@ -44,6 +44,9 @@ export class WorldStore {
       if (!state.entities) state.entities = buildEntitiesFromWorld(state);
       // kernel runtime for saves that predate P2
       if (!state.kernel) state.kernel = { lastFired: {}, channelDay: 0, channelUsed: {}, deferred: [] };
+      // structural-op data homes for saves that predate P3
+      if (!state.connections) state.connections = [];
+      if (!state.mapLayouts) state.mapLayouts = {};
       // migrate NPCs to interiors: add any new NPCs (nurses/clerk) the save is
       // missing, and relocate the structural cast to their canonical spots so
       // gym leaders / Oak / Sal actually live inside their buildings

@@ -138,7 +138,9 @@ function buildingDoor(b: Building): { doorX: number; doorY: number } {
 
 export function buildMap(mapId: string): MapData {
   if (isInteriorId(mapId)) return buildInterior(mapId);
-  const layout = LAYOUTS[mapId] ?? LAYOUTS.route1;
+  // P3: runtime-generated locations (createLocation) live in world.mapLayouts;
+  // hand-authored towns in LAYOUTS; unknown ids fall back to a route.
+  const layout = LAYOUTS[mapId] ?? world.state.mapLayouts?.[mapId] ?? LAYOUTS.route1;
   const tiles: number[][] = layout.map(row => {
     const out: number[] = [];
     for (let x = 0; x < MAP_W; x++) out.push(CHAR_TILE[row[x] ?? '.'] ?? T.GRASS);
@@ -163,6 +165,15 @@ export function buildMap(mapId: string): MapData {
   } else if (mapId === 'pewter') {
     addExit(spineX, MAP_H - 1, 'route1', spineX, 1);
     addExit(spineX + 1, MAP_H - 1, 'route1', spineX + 1, 1);
+  }
+
+  // P3: merge persisted connections (roads wireConnection laid) for this map, so
+  // generated links are walkable and survive a reload.
+  for (const c of world.state.connections ?? []) {
+    if (c.fromMap !== mapId) continue;
+    if (c.fromY >= 0 && c.fromY < MAP_H && c.fromX >= 0 && c.fromX < MAP_W) {
+      addExit(c.fromX, c.fromY, c.toMap, c.toX, c.toY);
+    }
   }
 
   // terrain frames first, then buildings stamp over them

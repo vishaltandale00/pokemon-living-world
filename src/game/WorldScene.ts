@@ -600,9 +600,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   // ——— battles ———
+  // All battles run on the real-time action scene now (full replacement of the
+  // old menu BattleScene). The pause→launch→resume handshake is identical.
   private startNpcBattle(npc: NPC) {
     this.scene.pause();
-    this.scene.launch('battle', { kind: 'npc', npcId: npc.id });
+    this.scene.launch('actionBattle', { kind: 'npc', npcId: npc.id });
   }
 
   private startWildBattle() {
@@ -610,7 +612,7 @@ export class WorldScene extends Phaser.Scene {
     const sp = pool[Math.floor(Math.random() * pool.length)];
     const lvl = 4 + Math.floor(Math.random() * 5);
     this.scene.pause();
-    this.scene.launch('battle', { kind: 'wild', wild: makeMonster(sp, lvl) });
+    this.scene.launch('actionBattle', { kind: 'wild', wild: makeMonster(sp, lvl) });
   }
 
   private onBattleEnd(result: string) {

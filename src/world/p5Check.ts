@@ -12,7 +12,7 @@ import { WAREHOUSE_BUNDLE, BUNDLES, type AuthoredBundle } from './bundles';
 import { chatJSON, hasKey } from '../llm/client';
 import type { WorldState } from './types';
 
-interface Snap { day: number; mag: Record<string, number>; tags: Record<string, string[]>; locations: number; buildings: number; }
+interface Snap { day: number; mag: Record<string, number>; tags: Record<string, string[]>; locations: number; buildings: number; events: string[]; }
 interface Run { state: WorldState; snaps: Snap[]; failures: string[]; }
 
 function applyBundle(s: WorldState, b: AuthoredBundle) {
@@ -29,7 +29,9 @@ function runPlaythrough(seed: number, bundle: AuthoredBundle, days: number): Run
   const prevMag: Record<string, number> = {};
   for (let d = 0; d < days; d++) {
     s.day += 1;
+    const evLen = s.events.length;
     runKernelTick(s, s.rules, { protectedIds: storyCriticalIds(s), ops: structuralOps });
+    const dayEvents = s.events.slice(evLen).map(e => (e.summary || e.kind).replace(/_/g, ' '));
     // INVARIANT 1 — no-free-minting: no channel jumps more than the per-day cap.
     for (const e of Object.values(s.entities)) {
       const delta = e.magnitude - (prevMag[e.id] ?? 0);
@@ -42,7 +44,7 @@ function runPlaythrough(seed: number, bundle: AuthoredBundle, days: number): Run
     }
     const mag: Record<string, number> = {}, tags: Record<string, string[]> = {};
     for (const e of Object.values(s.entities)) if (e.magnitude > 0) { mag[e.id] = e.magnitude; tags[e.id] = e.tags; }
-    snaps.push({ day: s.day, mag, tags, locations: Object.keys(s.mapLayouts).length, buildings: Object.keys(s.buildings).length });
+    snaps.push({ day: s.day, mag, tags, locations: Object.keys(s.mapLayouts).length, buildings: Object.keys(s.buildings).length, events: dayEvents });
   }
   // INVARIANT 3 — persistence: the save round-trips byte-identically.
   if (JSON.stringify(JSON.parse(JSON.stringify(s))) !== JSON.stringify(s)) failures.push('persistence: save round-trip changed the state');
@@ -139,8 +141,11 @@ export async function runP5Judge(): Promise<Record<string, unknown>> {
   const scored: Record<string, unknown>[] = [];
   for (const b of BUNDLES) {
     const r = runPlaythrough(42, b, b.days);
-    const timeline = r.snaps.map(s =>
-      `Day ${s.day}: ${Object.entries(s.mag).map(([k, v]) => `${k}=${v}`).join(', ') || '(quiet)'} | tags ${JSON.stringify(s.tags)} | locations ${s.locations} buildings ${s.buildings}`).join('\n');
+    const timeline = r.snaps.map(s => {
+      const mags = Object.entries(s.mag).map(([k, v]) => `${k}=${v}`).join(', ') || '(quiet)';
+      const beats = s.events.length ? ` — ${s.events.join('; ')}` : '';
+      return `Day ${s.day}: ${mags}${beats} | structures: ${s.locations} locations, ${s.buildings} buildings`;
+    }).join('\n');
     try {
       const sc = await chatJSON<{ legibility: number; coherence: number; divergenceConfidence: number; notes: string }>(
         JUDGE_SYSTEM, `BUNDLE: ${b.describe}\n\nTIMELINE:\n${timeline}`, 'p5_judge', JUDGE_SCHEMA as unknown as Record<string, unknown>, 500);

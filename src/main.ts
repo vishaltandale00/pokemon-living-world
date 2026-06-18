@@ -7,6 +7,7 @@ import { world } from './world/store';
 import { runDeterminismCheck } from './world/determinismCheck';
 import { runKernelCheck } from './world/kernelCheck';
 import { installHarness } from './world/harness';
+import { benchModels, listModels } from './llm/benchModels';
 import { MAP_W, MAP_H, TILE, T, buildMap } from './game/maps';
 
 const game = new Phaser.Game({
@@ -97,6 +98,9 @@ $('journal-close').onclick = closeJournal;
 (window as any).__kernelCheck = runKernelCheck;
 // P4 simulation harness — window.harness = { observe, act, snapshot }.
 installHarness();
+// Model latency benchmark for the fast dialogue tier — uses the stored key internally.
+(window as any).__benchModels = benchModels;
+(window as any).__listModels = listModels;
 // P5 eval — `__p5Check()` runs the mechanical DoD gates + divergence (no key);
 // `__p5Judge()` runs the qualitative 4-pillar rubric (needs the in-game API key).
 import('./world/p5Check').then(m => {

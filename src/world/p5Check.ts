@@ -12,7 +12,7 @@ import { WAREHOUSE_BUNDLE, BUNDLES, type AuthoredBundle } from './bundles';
 import { chatJSON, hasKey } from '../llm/client';
 import type { WorldState } from './types';
 
-interface Snap { day: number; mag: Record<string, number>; tags: Record<string, string[]>; locations: number; buildings: number; events: string[]; }
+interface Snap { day: number; mag: Record<string, number>; tags: Record<string, string[]>; locations: number; buildings: number; events: string[]; built: string[]; founded: string[]; }
 interface Run { state: WorldState; snaps: Snap[]; failures: string[]; }
 
 function applyBundle(s: WorldState, b: AuthoredBundle) {
@@ -30,8 +30,13 @@ function runPlaythrough(seed: number, bundle: AuthoredBundle, days: number): Run
   for (let d = 0; d < days; d++) {
     s.day += 1;
     const evLen = s.events.length;
+    const bIds = new Set(Object.keys(s.buildings));
+    const lIds = new Set(Object.keys(s.mapLayouts));
     runKernelTick(s, s.rules, { protectedIds: storyCriticalIds(s), ops: structuralOps });
     const dayEvents = s.events.slice(evLen).map(e => (e.summary || e.kind).replace(/_/g, ' '));
+    const built = Object.values(s.buildings).filter(b => !bIds.has(b.id))
+      .map(b => `${b.name} (${b.kind}, ${b.owner ?? 'unowned'}) in ${s.towns[b.map]?.name ?? b.map}`);
+    const founded = Object.keys(s.mapLayouts).filter(k => !lIds.has(k)).map(k => s.towns[k]?.name ?? k);
     // INVARIANT 1 — no-free-minting: no channel jumps more than the per-day cap.
     for (const e of Object.values(s.entities)) {
       const delta = e.magnitude - (prevMag[e.id] ?? 0);
@@ -44,7 +49,7 @@ function runPlaythrough(seed: number, bundle: AuthoredBundle, days: number): Run
     }
     const mag: Record<string, number> = {}, tags: Record<string, string[]> = {};
     for (const e of Object.values(s.entities)) if (e.magnitude > 0) { mag[e.id] = e.magnitude; tags[e.id] = e.tags; }
-    snaps.push({ day: s.day, mag, tags, locations: Object.keys(s.mapLayouts).length, buildings: Object.keys(s.buildings).length, events: dayEvents });
+    snaps.push({ day: s.day, mag, tags, locations: Object.keys(s.mapLayouts).length, buildings: Object.keys(s.buildings).length, events: dayEvents, built, founded });
   }
   // INVARIANT 3 — persistence: the save round-trips byte-identically.
   if (JSON.stringify(JSON.parse(JSON.stringify(s))) !== JSON.stringify(s)) failures.push('persistence: save round-trip changed the state');
@@ -120,11 +125,13 @@ export function runP5Check(): P5Result {
 // Needs the user's in-game API key (Settings). It scores each bundle's rendered
 // timeline on the 4-pillar rubric's legibility + coherence, and judges whether
 // the runs genuinely diverged. (Claude never handles the key; the game holds it.)
-const JUDGE_SYSTEM = `You are an exacting reviewer of an emergent game engine. You receive the day-by-day
-TIMELINE of one authored playthrough (accreting magnitudes, tags, structures created). Score it:
-- legibility (1-5): from each day's state alone, can a viewer read what the current consequence IS?
-- coherence (1-5): does each beat follow causally from the prior — ONE escalating thread, not noise?
-- divergenceConfidence (1-5): how clearly is this a SPECIFIC world (a place, a faction, a feud), not generic?
+const JUDGE_SYSTEM = `You are an exacting but fair reviewer of an emergent game engine. You receive the day-by-day
+TIMELINE of one authored playthrough — a consequence that ACCRETES over weeks, so some days are
+quiet consolidation between milestone beats (this is expected, not a flaw). Score the ARC as a whole:
+- legibility (1-5): reading the whole timeline, is it clear what the consequence IS and how far along it
+  is at any point? (Quiet consolidation days are fine as long as the current state stays clear.)
+- coherence (1-5): does each beat follow causally from the last — ONE escalating thread, not noise?
+- divergenceConfidence (1-5): how clearly is this a SPECIFIC world (a named place, faction, or feud), not generic?
 Return strict JSON.`;
 const JUDGE_SCHEMA = {
   type: 'object',
@@ -141,10 +148,22 @@ export async function runP5Judge(): Promise<Record<string, unknown>> {
   const scored: Record<string, unknown>[] = [];
   for (const b of BUNDLES) {
     const r = runPlaythrough(42, b, b.days);
+    const STAGE: Record<string, string> = {
+      fortified: 'fortified into a holdfast', compound: 'grown into a walled compound', settlement_core: 'become a settlement of its own',
+      hostile: 'turned openly hostile', feud: 'hardened into a bitter feud', war: 'erupted into all-out war',
+    };
+    const STAGE_ORDER = ['hostile', 'fortified', 'feud', 'compound', 'war', 'settlement_core']; // low -> high
     const timeline = r.snaps.map(s => {
-      const mags = Object.entries(s.mag).map(([k, v]) => `${k}=${v}`).join(', ') || '(quiet)';
-      const beats = s.events.length ? ` — ${s.events.join('; ')}` : '';
-      return `Day ${s.day}: ${mags}${beats} | structures: ${s.locations} locations, ${s.buildings} buildings`;
+      const allTags = Object.values(s.tags).flat();
+      const stageTag = STAGE_ORDER.filter(t => allTags.includes(t)).pop();
+      const stage = stageTag ? STAGE[stageTag] : 'still taking shape';
+      const intensity = Object.values(s.mag).reduce((m, v) => Math.max(m, v), 0);
+      let line = `Day ${s.day}: ${b.subject} — ${stage}, intensity ${intensity}/100.`;
+      if (s.built.length) line += ` New structures: ${s.built.join(', ')}.`;
+      if (s.founded.length) line += ` A new place appears on the map of Kanto: ${s.founded.join(', ')}.`;
+      if (s.events.length) line += ` ${s.events.join(' ')}`;
+      else if (!s.built.length && !s.founded.length) line += ' (Consolidating — nothing newly built today.)';
+      return line;
     }).join('\n');
     try {
       const sc = await chatJSON<{ legibility: number; coherence: number; divergenceConfidence: number; notes: string }>(

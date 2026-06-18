@@ -7,6 +7,12 @@ dist/
 .playwright-mcp/
 .claude/settings.local.json
 
+# secrets — NEVER commit (this repo is public)
+.env
+.env.local
+tools/.env
+*.key
+
 # os / misc
 .DS_Store
 *.log

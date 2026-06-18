@@ -30,6 +30,17 @@ import { dirname, join } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SPRITES = join(HERE, '..', 'public', 'sprites');
 
+// Load tools/.env (gitignored) if present, so the key never needs to be exported
+// or pasted into a command. Existing process.env wins.
+(function loadEnv() {
+  const envPath = join(HERE, '.env');
+  if (!existsSync(envPath)) return;
+  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+})();
+
 // speciesId -> national dex (matches public/sprites/<dexId>.png). Kept in sync with src/world/monsters.ts.
 const DEX = {
   charmander: 4, squirtle: 7, bulbasaur: 1, pikachu: 25, geodude: 74, onix: 95,

@@ -237,7 +237,7 @@ export class ActionBattleScene extends Phaser.Scene {
       // sync surviving player hp, award XP for the kill
       this.playerParty[this.playerIdx].hp = Math.max(1, Math.round(eng.p.hp));
       const lvl = awardXp(this.playerParty[this.playerIdx], defeated, !!this.npc);
-      if (lvl) this.levelMsgs.push(lvl);
+      if (lvl) { this.levelMsgs.push(lvl); eng.pulseText(eng.p.x, eng.p.y - 64, 'LEVEL UP!', '120,230,150', 22); }
       if (this.enemyIdx < this.enemyParty.length - 1) {
         this.enemyIdx++;
         const next = this.enemyParty[this.enemyIdx];

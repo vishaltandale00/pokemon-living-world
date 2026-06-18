@@ -23,7 +23,7 @@ function townOf(mapId: string): string {
   return world.state.towns[mapId] ? mapId : 'viridian';
 }
 
-// Accumulate XP into the active mon and level it up (mirrors BattleScene.awardXp).
+// Accumulate XP into the active mon and level it up.
 // Returns a "grew to LvN!" line if it leveled, else null.
 export function awardXp(player: MonsterInstance, defeated: MonsterInstance, isNpc: boolean): string | null {
   if (player.hp <= 0) return null;
@@ -40,7 +40,7 @@ export function awardXp(player: MonsterInstance, defeated: MonsterInstance, isNp
   return leveled ? `${SPECIES[player.speciesId].name} grew to Lv${player.level}!` : null;
 }
 
-// Compute the catch chance for a weakened wild mon (mirrors BattleScene.tryCatch).
+// Compute the catch chance for a weakened wild mon.
 export function catchChance(speciesId: string, hpRatio: number): number {
   const spec = SPECIES[speciesId];
   return Math.min(0.92, spec.catchRate * 0.5 + (1 - hpRatio) * 0.55);

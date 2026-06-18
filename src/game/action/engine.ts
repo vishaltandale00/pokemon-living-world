@@ -58,7 +58,7 @@ export interface BossState {
   kit: BossKit;
   x: number; y: number; r: number;
   hp: number; maxHp: number; hpShown: number;
-  type1: string; type2: string | null; name: string; element: string;
+  type1: string; type2: string | null; name: string; element: string; level: number; roleLabel: string;
   face: number; posture: number; maxPosture: number; lastHit: number;
   state: 'idle' | 'tell' | 'active' | 'recover' | 'broken';
   timer: number; tellTotal: number; move: BossMoveDef | null;
@@ -84,7 +84,7 @@ function freshPlayer(kit: ActionKit): PlayerState {
 function freshBoss(kit: BossKit): BossState {
   return {
     kit, x: 650, y: 300, r: kit.radius, hp: kit.hpPool, maxHp: kit.hpPool, hpShown: kit.hpPool,
-    type1: kit.type1, type2: kit.type2, name: kit.name, element: kit.element,
+    type1: kit.type1, type2: kit.type2, name: kit.name, element: kit.element, level: kit.level, roleLabel: kit.roleLabel,
     face: -1, posture: 0, maxPosture: kit.maxPosture, lastHit: 999,
     state: 'idle', timer: 1100, tellTotal: 1, move: null, target: { x: 0, y: 0 }, hit: false,
     phase: 1, broken: 0, flash: 0, atkBase: kit.atkBase,
@@ -100,7 +100,7 @@ export class ActionEngine {
 
   // juice / camera globals
   time = 0; private prev = 0; started = false;
-  hitstop = 0; shake = 0; slow = 1; flash = 0; zoom = 1; introT = 1400;
+  hitstop = 0; shake = 0; slow = 1; flash = 0; zoom = 1; introT = 2400;
   camX = STAGE_W / 2; camY = STAGE_H / 2; kickX = 0; kickY = 0;
   impact = 0; impactX = 0; impactY = 0;
   groundFlash = 0; groundFlashX = 0; groundFlashY = 0;

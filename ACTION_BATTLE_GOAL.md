@@ -57,11 +57,11 @@ If the browser extension is unavailable, mark the gate `- [ ] (BLOCKED: needs li
 
 ## E. Scope / PLAN
 - [ ] authored per-boss move kits: at minimum Brock ≠ Giovanni ≠ generic (PLAN's "learnable pattern table per boss")
-- [ ] (D3) action-only: delete `BattleScene.ts`, drop its import + scene registration in main.ts, route nothing to 'battle'
-- [ ] intro card shows boss role + level and holds long enough to read; level-ups pulse in-arena (not only post-fight banner)
+- [x] (D3) action-only: delete `BattleScene.ts`, drop its import + scene registration in main.ts, route nothing to 'battle'
+- [x] intro card shows boss role + level and holds long enough to read; level-ups pulse in-arena (not only post-fight banner)
 
 ## F. Cleanup / parity
-- [ ] old `BattleScene.ts` retired: deleted, or refactored to call `battleOutcome` helpers so it can't silently diverge (and stale comments fixed)
+- [x] old `BattleScene.ts` retired: deleted, drop its import + registration; stale comments in battleOutcome fixed
 - [x] trainer-fight flee shows "can't run from a trainer!" feedback (parity with old)
 
 ---

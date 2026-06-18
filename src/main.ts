@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import { IntroScene } from './game/IntroScene';
 import { WorldScene } from './game/WorldScene';
-import { BattleScene } from './game/BattleScene';
 import { ActionBattleScene } from './game/ActionBattleScene';
 import { getConfig, setConfig, testConnection } from './llm/client';
 import { world } from './world/store';
@@ -16,7 +15,7 @@ const game = new Phaser.Game({
   zoom: 2,
   pixelArt: true,
   backgroundColor: '#0b0f14',
-  scene: [IntroScene, WorldScene, BattleScene, ActionBattleScene],
+  scene: [IntroScene, WorldScene, ActionBattleScene],
 });
 
 // ——— Settings overlay ———

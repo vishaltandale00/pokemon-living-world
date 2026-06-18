@@ -126,11 +126,19 @@ export interface BossKit {
   element: string;
   type1: string;
   type2: string | null;
+  level: number;        // for the intro card
+  roleLabel: string;    // "Gym Leader" / "Wild" / "Trainer" … for the intro card
   hpPool: number;       // scaled so the duel lasts (boss is a damage sponge vs your kit)
   maxPosture: number;
   atkBase: number;      // boss-move damage scales off this
   radius: number;       // body hit radius
 }
+
+const ROLE_LABEL: Partial<Record<RoleId, string>> = {
+  gym_leader: 'Gym Leader', elite_four: 'Elite Four', champion: 'Champion',
+  rocket_boss: 'Rocket Boss', rocket_officer: 'Rocket Officer', rocket_grunt: 'Rocket Grunt',
+  trainer: 'Trainer', gym_challenger: 'Challenger', ranger: 'Ranger', legend_hunter: 'Legend Hunter', wanderer: 'Trainer',
+};
 
 // Bosses get an HP multiplier so the action duel lasts a satisfying time —
 // stronger roles soak more. Move damage scales off the opponent's real atk.
@@ -149,6 +157,8 @@ export function toBossKit(opponent: MonsterInstance, opts: { role?: RoleId; wild
     element: s.type1,
     type1: s.type1,
     type2: s.type2,
+    level: opponent.level,
+    roleLabel: opts.wild ? 'Wild' : (opts.role ? (ROLE_LABEL[opts.role] ?? 'Trainer') : 'Trainer'),
     hpPool: Math.round(opponent.maxHp * mult),
     maxPosture: Math.round(80 + opponent.def * 0.6),
     atkBase: opponent.atk,

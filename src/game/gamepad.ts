@@ -34,16 +34,22 @@ export class GamepadPoller {
 
   poll(): PadFrame {
     const out = empty();
-    const pads = (typeof navigator !== 'undefined' && navigator.getGamepads) ? navigator.getGamepads() : [];
-    let gp: Gamepad | null = null;
-    for (const p of pads) { if (p) { gp = p; break; } }
-    if (!gp) { this.prev = []; this.prevDir = { up: false, down: false, left: false, right: false }; return out; }
+    const raw = (typeof navigator !== 'undefined' && navigator.getGamepads) ? navigator.getGamepads() : [];
+    // MERGE all connected pads: browsers expose duplicate/phantom entries (e.g. an
+    // Xbox controller can show up 2-3 times at different indices), and only one is
+    // actually live. Reading "the first" picks an idle ghost. Instead take the
+    // largest-deflection axis and OR every button across all pads, so whichever
+    // controller you're really holding registers.
+    const live: Gamepad[] = [];
+    for (const p of raw) if (p) live.push(p);
+    if (!live.length) { this.prev = []; this.prevDir = { up: false, down: false, left: false, right: false }; return out; }
     out.connected = true;
-    const pressed = (i: number) => { const b = gp!.buttons[i]; return !!b && (b.pressed || b.value > 0.5); };
+    const axis = (i: number) => { let v = 0; for (const g of live) { const a = g.axes[i] || 0; if (Math.abs(a) > Math.abs(v)) v = a; } return v; };
+    const pressed = (i: number) => live.some(g => { const b = g.buttons[i]; return !!b && (b.pressed || b.value > 0.5); });
     const edge = (i: number) => { const now = pressed(i); const was = this.prev[i]; this.prev[i] = now; return now && !was; };
 
-    let mx = Math.abs(gp.axes[0] || 0) > DZ ? gp.axes[0] : 0;
-    let my = Math.abs(gp.axes[1] || 0) > DZ ? gp.axes[1] : 0;
+    let mx = Math.abs(axis(0)) > DZ ? axis(0) : 0;
+    let my = Math.abs(axis(1)) > DZ ? axis(1) : 0;
     if (pressed(BTN.dLeft)) mx = -1; if (pressed(BTN.dRight)) mx = 1;
     if (pressed(BTN.dUp)) my = -1; if (pressed(BTN.dDown)) my = 1;
     out.mx = mx; out.my = my;

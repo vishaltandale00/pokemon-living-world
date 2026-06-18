@@ -3,7 +3,7 @@ import { world } from '../world/store';
 import { SPECIES, type MonsterInstance } from '../world/monsters';
 import type { NPC, RoleId } from '../world/types';
 import { ActionEngine, STAGE_W, STAGE_H } from './action/engine';
-import { BattleRenderer, type BattleAssets } from './action/render';
+import { BattleRenderer, type BattleAssets, type PoseSet } from './action/render';
 import { toActionKit, toBossKit } from './action/kit';
 import { applyBattleOutcome, awardXp, catchChance, type BattleOutcome, type OutcomeCtx } from '../world/battleOutcome';
 import { GamepadPoller } from './gamepad';
@@ -34,6 +34,7 @@ export class ActionBattleScene extends Phaser.Scene {
   private sctx!: CanvasRenderingContext2D;
   private dpr = 1;
   private sprites = new Map<number, HTMLImageElement>();
+  private poses = new Map<number, PoseSet>();   // optional AI-generated state frames, keyed by dexId
 
   private pad = new GamepadPoller();
   private held = new Set<string>();
@@ -153,13 +154,22 @@ export class ActionBattleScene extends Phaser.Scene {
   }
 
   private preloadSprite(dexId: number) {
-    if (this.sprites.has(dexId)) return;
-    const img = new Image();
-    img.src = `/sprites/${dexId}.png`;
-    this.sprites.set(dexId, img);
+    if (!this.sprites.has(dexId)) {
+      const img = new Image();
+      img.src = `/sprites/${dexId}.png`;
+      this.sprites.set(dexId, img);
+    }
+    // best-effort: load AI pose frames if they exist (a 404 just leaves width 0 → renderer falls back)
+    if (!this.poses.has(dexId)) {
+      const mk = (suffix: string) => { const im = new Image(); im.src = `/sprites/${dexId}_${suffix}.png`; return im; };
+      this.poses.set(dexId, { idle: mk('idle'), atk: mk('atk'), hurt: mk('hurt') });
+    }
   }
   private imgFor(m: MonsterInstance): HTMLImageElement | null {
     return this.sprites.get(SPECIES[m.speciesId].dexId) ?? null;
+  }
+  private posesFor(m: MonsterInstance): PoseSet | undefined {
+    return this.poses.get(SPECIES[m.speciesId].dexId);
   }
 
   update(time: number) {
@@ -197,6 +207,8 @@ export class ActionBattleScene extends Phaser.Scene {
     const assets: BattleAssets = {
       playerImg: this.imgFor(this.playerParty[this.playerIdx]),
       bossImg: this.imgFor(this.enemyParty[this.enemyIdx]),
+      playerPoses: this.posesFor(this.playerParty[this.playerIdx]),
+      bossPoses: this.posesFor(this.enemyParty[this.enemyIdx]),
     };
     this.battleRenderer.render(this.sctx, this.engine, assets);
     this.present();

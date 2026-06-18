@@ -12,7 +12,12 @@ const hash = (n: number) => { const s = Math.sin(n * 127.1) * 43758.5453; return
 const norm = (x: number, y: number) => { const l = Math.hypot(x, y) || 1; return { x: x / l, y: y / l }; };
 const LIGHT = norm(-0.45, -0.9);
 
-export interface BattleAssets { playerImg: HTMLImageElement | null; bossImg: HTMLImageElement | null; }
+export interface PoseSet { idle: HTMLImageElement | null; atk: HTMLImageElement | null; hurt: HTMLImageElement | null; }
+export interface BattleAssets {
+  playerImg: HTMLImageElement | null; bossImg: HTMLImageElement | null;
+  playerPoses?: PoseSet; bossPoses?: PoseSet;   // optional AI-generated state frames
+}
+const poseOk = (im?: HTMLImageElement | null): im is HTMLImageElement => !!im && im.complete && im.width > 0;
 
 const TYPECOL: Record<string, string> = {
   fire: '#ef7a3a', water: '#4aa8e0', grass: '#5fc07a', electric: '#e8c84a', rock: '#b8a878',
@@ -82,8 +87,8 @@ export class BattleRenderer {
       const prog = b.state === 'tell' ? clamp(1 - b.timer / (b.tellTotal || b.move.tell), 0, 1) : clamp(1 - b.timer / b.move.active, 0, 1);
       this.drawTelegraph(g, eng, b.state, prog);
     }
-    this.drawBoss(g, eng, assets.bossImg);
-    this.drawPlayer(g, eng, assets.playerImg);
+    this.drawBoss(g, eng, this.bossFrame(eng, assets));
+    this.drawPlayer(g, eng, this.playerFrame(eng, assets));
     this.drawShots(g, eng);
     this.drawFx(g, eng);
     g.restore();
@@ -128,6 +133,26 @@ export class BattleRenderer {
   }
 
   // ——— sprite fighters ———
+  // pick the state-appropriate frame if AI pose frames exist, else the base sprite
+  private bossFrame(eng: ActionEngine, a: BattleAssets): HTMLImageElement | null {
+    const p = a.bossPoses, b = eng.b;
+    if (p) {
+      if (b.state === 'active' && poseOk(p.atk)) return p.atk;
+      if (b.flash > 60 && poseOk(p.hurt)) return p.hurt;
+      if (poseOk(p.idle)) return p.idle;
+    }
+    return a.bossImg;
+  }
+  private playerFrame(eng: ActionEngine, a: BattleAssets): HTMLImageElement | null {
+    const ps = a.playerPoses, p = eng.p;
+    if (ps) {
+      if (p.atk && (p.atk.kind === 'light' || p.atk.kind === 'heavy' || p.atk.kind === 'cone') && poseOk(ps.atk)) return ps.atk;
+      if (p.hurt > 80 && poseOk(ps.hurt)) return ps.hurt;
+      if (poseOk(ps.idle)) return ps.idle;
+    }
+    return a.playerImg;
+  }
+
   private drawBoss(g: CanvasRenderingContext2D, eng: ActionEngine, img: HTMLImageElement | null) {
     const b = eng.b, time = eng.time; const broken = b.broken > 0;
     const groundY = b.y + 40;

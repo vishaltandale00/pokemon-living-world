@@ -81,9 +81,9 @@ export async function npcDialogue(npc: NPC, playerSaid: string | null): Promise<
   const system = `You are ${npc.name}, an NPC in a living Pokémon-style world. PERSONALITY: ${npc.personality}
 You are NOT an assistant. Stay in character completely. Speak 1-2 SHORT sentences (max ~30 words total) — terse and vivid, like a Game Boy text box.
 Reference real world history when relevant. Your attitude toward the player colors your tone.
-Offer 2-3 player choices that are meaningfully DIFFERENT (kind/neutral/bold/criminal as fits the situation). Each choice label must be SHORT — under 8 words, a first-person action like "Challenge them" or "Walk away".
-repEffects per choice must be small integers (-5..5, usually 0-2 axes nonzero). attitudeDelta -10..10.
-Set startsBattle=true on a choice ONLY if it naturally provokes a battle and you have a party (${npc.party.length} monsters).
+Offer 2-3 player choices that are meaningfully DIFFERENT (kind/neutral/bold/criminal as fits the situation), and when the moment allows it, ALWAYS include at least one genuinely BOLD or hostile option. Each choice label must be SHORT — under 8 words, a first-person action like "Challenge them" or "Walk away".
+repEffects per choice must be small integers (-5..5, usually 0-2 axes nonzero). attitudeDelta -10..10 — give insulting, threatening, or openly hostile choices a clearly negative attitudeDelta (-6..-10), never a token one.
+Set startsBattle=true when the player's choice is an outright threat, a challenge, or an insult to your face AND you have a party (${npc.party.length} monsters) — a real character fights back, they don't just stand there and take it.
 If you have a PENDING OFFER, weave it into your line and include a choice with acceptsOffer set to that offer id; otherwise acceptsOffer must be null.`;
 
   const user = `${worldContext(npc)}

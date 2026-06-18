@@ -549,7 +549,9 @@ export class WorldScene extends Phaser.Scene {
     const eff = ch.repEffects;
     if (eff.league || eff.rocket || eff.civic || eff.research)
       world.addRep(eff, `talking with ${npc.name}`);
+    const attBefore = npc.attitude;
     npc.attitude = Math.max(-100, Math.min(100, npc.attitude + ch.attitudeDelta));
+    const attAfter = npc.attitude;
 
     if (ch.acceptsOffer) {
       // match strictly by id; only fall back to fromNpc if exactly one offer exists
@@ -571,11 +573,22 @@ export class WorldScene extends Phaser.Scene {
       }
     }
 
-    if (ch.startsBattle) {
+    // Provoking an NPC has REAL consequences. Attitude is an accretion channel:
+    // push their regard past breaking and, if they can fight, they SNAP and
+    // attack — the seed-game version of a kernel "channel crosses threshold ->
+    // fires a consequence" rule. (No-key safe; works for any battle-capable NPC.)
+    const SNAP = -45;
+    const provoked = attBefore >= SNAP && attAfter < SNAP && npc.party.length > 0 && !npc.defeated;
+    if (ch.startsBattle || provoked) {
+      if (provoked && !ch.startsBattle) this.showBanner(`You've pushed ${npc.name} too far — they move to attack!`, 4500);
       this.closeDialogue();
       this.startNpcBattle(npc);
       return;
     }
+    // a sharp loss of regard registers visibly even short of a fight, so the
+    // player can feel the pressure building toward a snap
+    if (ch.attitudeDelta <= -4 && attAfter > SNAP && npc.party.length > 0)
+      this.showBanner(`${npc.name} bristles — you're wearing their patience thin.`, 2500);
 
     // continue conversation (prefetched follow-ups make this instant)
     this.dlgBusy = true;

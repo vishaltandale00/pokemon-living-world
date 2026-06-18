@@ -52,6 +52,7 @@ export class WorldScene extends Phaser.Scene {
 
   // controller
   private pad = new GamepadPoller();
+  private padIndicator!: Phaser.GameObjects.Text;
   private padNow: PadFrame = { connected: false, mx: 0, my: 0, A: false, B: false, X: false, Y: false, LB: false, RB: false, LT: false, RT: false, start: false, back: false, up: false, down: false, left: false, right: false };
 
   constructor() { super('world'); }
@@ -90,6 +91,11 @@ export class WorldScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '10px', color: '#eaf4ff',
       backgroundColor: '#101820dd', padding: { x: 6, y: 4 },
     }).setScrollFactor(0).setDepth(101);
+
+    // lights up when the browser actually sees a connected controller
+    this.padIndicator = this.add.text(MAP_W * TILE - 4, 4, '🎮', {
+      fontFamily: 'monospace', fontSize: '13px', backgroundColor: '#101820dd', padding: { x: 4, y: 3 },
+    }).setOrigin(1, 0).setScrollFactor(0).setDepth(101).setVisible(false);
 
     // banner sits below the 3-line HUD so they never overlap
     this.banner = this.add.text(MAP_W * TILE / 2, 70, '', {
@@ -261,6 +267,7 @@ export class WorldScene extends Phaser.Scene {
   // ——— game loop ———
   update() {
     const gp = this.pad.poll(); this.padNow = gp;
+    if (this.padIndicator) this.padIndicator.setVisible(gp.connected);
     if (this.shopBox) { this.updateShop(); return; }
     if (this.dlgBox) { this.updateDialogue(); return; }
     if (this.moving || this.ticking) return;

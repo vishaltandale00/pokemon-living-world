@@ -16,6 +16,14 @@ export interface PadFrame {
 
 const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, back: 8, start: 9, dUp: 12, dDown: 13, dLeft: 14, dRight: 15 };
 
+// Browsers only expose a gamepad to navigator.getGamepads() AFTER the page receives
+// a button press from it (a security gate). Log the connect/disconnect so it's obvious
+// in the console whether the browser has seen the controller.
+if (typeof window !== 'undefined') {
+  window.addEventListener('gamepadconnected', e => console.log('[gamepad] connected:', (e as GamepadEvent).gamepad.id, '— press any face button to wake it if input lags'));
+  window.addEventListener('gamepaddisconnected', () => console.log('[gamepad] disconnected'));
+}
+
 function empty(): PadFrame {
   return { connected: false, mx: 0, my: 0, A: false, B: false, X: false, Y: false, LB: false, RB: false, LT: false, RT: false, start: false, back: false, up: false, down: false, left: false, right: false };
 }

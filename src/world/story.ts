@@ -17,6 +17,10 @@ export interface Chapter {
   directive: string;   // shown once when this chapter becomes current
   hint: string;        // where to go, surfaced in the objective tooltip/banner
   talkTo?: string;     // npc id whose conversation advances this chapter
+  // Entity ids (kernel namespace) this chapter DEPENDS ON — removing/transferring
+  // any of them while the chapter is unsatisfied would softlock the spine. The
+  // kernel's protected-set invariant refuses retire/transfer of these (P2c).
+  critical?: string[];
   done: (w: WorldState) => boolean;
   onComplete?: (w: WorldState) => string; // side effects; returns the payoff toast
 }
@@ -28,6 +32,7 @@ export const STORY: Chapter[] = [
     id: 'boulder_badge',
     objective: 'Earn the Boulder Badge',
     hint: 'Travel north to Pewter City and defeat Brock at the Gym.',
+    critical: ['npc:brock'],
     directive:
       "PROF. OAK: \"Every trainer starts the same way — prove yourself in a Gym.\n" +
       "Head north through Route 1 to Pewter City and challenge Brock for the\n" +
@@ -40,6 +45,7 @@ export const STORY: Chapter[] = [
     id: 'the_warehouse',
     objective: 'Hear out Elder Rosa',
     hint: 'Find Elder Rosa in Pewter City and ask what is troubling the town.',
+    critical: ['npc:elder_rosa'],
     directive:
       "Brock lowers his voice: \"Before you go — talk to Elder Rosa here in Pewter.\n" +
       "She's worried about the old warehouse on the south edge of town. Something's\n" +
@@ -57,6 +63,7 @@ export const STORY: Chapter[] = [
     id: 'bust_rocket',
     objective: 'Drive Archer out of the warehouse',
     hint: 'Confront the Rocket officer Archer at the warehouse on the south edge of Pewter.',
+    critical: ['npc:archer'],
     directive:
       "The warehouse looms on Pewter's south edge, its doors scarred and patched.\n" +
       "Inside, the Rocket officer Archer is waiting. Beat him, and Team Rocket\n" +
@@ -75,6 +82,7 @@ export const STORY: Chapter[] = [
     id: 'viridian_secret',
     objective: 'Confront Giovanni at the Viridian Gym',
     hint: 'Return to Viridian City and challenge Giovanni — the man behind Team Rocket.',
+    critical: ['npc:giovanni'],
     directive:
       "It fits. The respected Viridian Gym Leader and the unseen boss of Team\n" +
       "Rocket are the same man: Giovanni. He won't confess — but beat him in his\n" +
@@ -92,6 +100,7 @@ export const STORY: Chapter[] = [
     id: 'champion',
     objective: 'Become the League Champion',
     hint: 'You hold both badges and the League\'s respect — claim the title of Champion.',
+    critical: ['slot:champion'],
     directive:
       "With Rocket broken and two badges earned, only one seat remains empty: the\n" +
       "Champion of the Pokémon League. Meet its requirements and the title — and\n" +
@@ -104,6 +113,19 @@ export const STORY: Chapter[] = [
 
 export function currentChapter(w: WorldState): Chapter | null {
   return STORY[w.player.story ?? 0] ?? null;
+}
+
+// The protected set (P2c): entity ids referenced by the CURRENT and all FUTURE
+// (not-yet-satisfied) chapters. The kernel refuses retireEntity/transferControl
+// of these so an authored bundle can never softlock the spine. Passed into
+// runKernelTick by the world-tick glue.
+export function storyCriticalIds(w: WorldState): Set<string> {
+  const out = new Set<string>();
+  const from = w.player.story ?? 0;
+  for (let i = from; i < STORY.length; i++) {
+    for (const id of STORY[i].critical ?? []) out.add(id);
+  }
+  return out;
 }
 
 export function objectiveLine(w: WorldState): string {

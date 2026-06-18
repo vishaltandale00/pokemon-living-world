@@ -123,11 +123,30 @@ function testTermination() {
   check('termination: cyclic thresholds settle without hang', completed && bounded, `p=${mag(s, 'p')} q=${mag(s, 'q')}`);
 }
 
+// 7) PROTECTED SET: retire/transfer of a story-critical entity must be refused
+// (a softlock would reload byte-identical forever), but work when unprotected.
+function testProtectedSet() {
+  const s = fresh();
+  s.entities['npc:giovanni'] = mkEnt('npc:giovanni', { type: 'npc' });
+  s.entities['territory:1'] = mkEnt('territory:1', { type: 'location' });
+  const rules: Rule[] = [
+    { id: 'retire', when: { t: 'exists', id: 'npc:giovanni' }, then: [{ t: 'retireEntity', e: { id: 'npc:giovanni' } }], throttleDays: 0 },
+    { id: 'grab', when: { t: 'exists', id: 'territory:1' }, then: [{ t: 'transferControl', e: { id: 'territory:1' }, toFaction: 'x' }], throttleDays: 0 },
+  ];
+  runKernelTick(s, rules, { protectedIds: new Set(['npc:giovanni', 'territory:1']) });
+  check('protected-set: retire of story-critical entity refused', !hasTag(s.entities['npc:giovanni'], '__retired'), `tags=${s.entities['npc:giovanni'].tags.join(',')}`);
+  check('protected-set: transferControl of protected entity refused', !controlled(s, 'territory:1', 'x'), '');
+  // sanity: unprotected, the same ops DO apply
+  const s2 = fresh(); s2.entities['npc:giovanni'] = mkEnt('npc:giovanni', { type: 'npc' });
+  runKernelTick(s2, [{ id: 'retire', when: { t: 'exists', id: 'npc:giovanni' }, then: [{ t: 'retireEntity', e: { id: 'npc:giovanni' } }], throttleDays: 0 }], {});
+  check('protected-set: unprotected retire still works (not over-blocking)', hasTag(s2.entities['npc:giovanni'], '__retired'), '');
+}
+
 export interface KernelCheckResult { ok: boolean; checks: Check[] }
 export function runKernelCheck(): KernelCheckResult {
   checks.length = 0;
   testVelocityCap(); testCascadeBlocked(); testOneCrossPerTick();
-  testAccretionAndDecay(); testDeterminism(); testTermination();
+  testAccretionAndDecay(); testDeterminism(); testTermination(); testProtectedSet();
   const ok = checks.every(c => c.pass);
   // eslint-disable-next-line no-console
   console.log('[kernel] ' + (ok ? 'ALL PASS' : 'FAIL') + '\n' + checks.map(c => `${c.pass ? '✓' : '✗'} ${c.name}${c.pass ? '' : ' — ' + c.detail}`).join('\n'));

@@ -120,7 +120,7 @@ function capWrite(state: WorldState, entityId: string, channel: string, delta: n
 }
 
 // ——— effect application (non-threshold path: applied after the eval pass) ———
-interface ApplyCtx { state: WorldState; each: string | null; fromThreshold: boolean; }
+interface ApplyCtx { state: WorldState; each: string | null; fromThreshold: boolean; protectedIds: Set<string>; }
 function applyEffect(eff: Effect, ctx: ApplyCtx): void {
   const { state, each } = ctx;
   const ent = (ref: Ref) => { const id = resolveId(ref, each); return id ? state.entities[id] ?? null : null; };
@@ -163,9 +163,15 @@ function applyEffect(eff: Effect, ctx: ApplyCtx): void {
     case 'setTag': { const e = ent(eff.e); if (e) addTag(e, eff.tag); return; }
     case 'clearTag': { const e = ent(eff.e); if (e) removeTag(e, eff.tag); return; }
     case 'logEvent': { state.events.push({ day: state.day, kind: eff.key, summary: eff.key, data: { key: eff.key } }); return; }
-    case 'retireEntity': { const e = ent(eff.e); if (e) addTag(e, RETIRED); return; } // protected-set guard added next step
+    case 'retireEntity': {
+      const id = resolveId(eff.e, each); if (!id) return;
+      if (ctx.protectedIds.has(id)) return;        // PROTECTED-SET: refuse — would softlock the story
+      const e = state.entities[id]; if (e) addTag(e, RETIRED); return;
+    }
     case 'transferControl': {
-      const e = ent(eff.e); if (!e) return;
+      const id = resolveId(eff.e, each); if (!id) return;
+      if (ctx.protectedIds.has(id)) return;        // PROTECTED-SET: refuse control transfer of a story-critical entity
+      const e = state.entities[id]; if (!e) return;
       e.relations = e.relations.filter(r => r.rel !== 'controlledBy');
       e.relations.push({ to: `faction:${eff.toFaction}`, rel: 'controlledBy', weight: 1 });
       return;
@@ -180,11 +186,13 @@ function applyEffect(eff: Effect, ctx: ApplyCtx): void {
 }
 
 export interface KernelTickLog { firedRules: string[]; crossings: { id: string; channel: string; level: number; dir: 'up' | 'down' }[]; }
+export interface TickOpts { protectedIds?: Set<string>; }
 
 // ——— the tick ———
 // Advances the kernel ONE day. The caller owns state.day; this reads it.
-export function runKernelTick(state: WorldState, rules: Rule[]): KernelTickLog {
+export function runKernelTick(state: WorldState, rules: Rule[], opts: TickOpts = {}): KernelTickLog {
   const k: KernelState = state.kernel;
+  const protectedIds = opts.protectedIds ?? new Set<string>();
   // new day -> fresh velocity budget
   if (k.channelDay !== state.day) { k.channelDay = state.day; k.channelUsed = {}; }
 
@@ -211,7 +219,7 @@ export function runKernelTick(state: WorldState, rules: Rule[]): KernelTickLog {
     for (const each of bindings) {
       if (!evalPredicate(snap, rule.when, each)) continue;
       didFire = true;
-      for (const eff of rule.then) applyEffect(eff, { state, each, fromThreshold: false });
+      for (const eff of rule.then) applyEffect(eff, { state, each, fromThreshold: false, protectedIds });
     }
     if (didFire) { k.lastFired[rule.id] = state.day; fired.push(rule.id); }
   }
@@ -230,10 +238,10 @@ export function runKernelTick(state: WorldState, rules: Rule[]): KernelTickLog {
       if (after > before) {
         // highest level strictly crossed upward (>= after-side, > before-side)
         const crossed = levels.filter(t => before < t.level && after >= t.level).sort((a, b) => b.level - a.level)[0];
-        if (crossed) { crossings.push({ id: e.id, channel: ch, level: crossed.level, dir: 'up' }); for (const eff of crossed.up) applyEffect(eff, { state, each: e.id, fromThreshold: true }); }
+        if (crossed) { crossings.push({ id: e.id, channel: ch, level: crossed.level, dir: 'up' }); for (const eff of crossed.up) applyEffect(eff, { state, each: e.id, fromThreshold: true, protectedIds }); }
       } else {
         const crossed = levels.filter(t => after < t.level && before >= t.level).sort((a, b) => a.level - b.level)[0];
-        if (crossed) { crossings.push({ id: e.id, channel: ch, level: crossed.level, dir: 'down' }); for (const eff of crossed.down) applyEffect(eff, { state, each: e.id, fromThreshold: true }); }
+        if (crossed) { crossings.push({ id: e.id, channel: ch, level: crossed.level, dir: 'down' }); for (const eff of crossed.down) applyEffect(eff, { state, each: e.id, fromThreshold: true, protectedIds }); }
       }
     }
   }

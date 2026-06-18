@@ -96,6 +96,8 @@ $('journal-close').onclick = closeJournal;
 (window as any).__kernelCheck = runKernelCheck;
 // P4 simulation harness — window.harness = { observe, act, snapshot }.
 installHarness();
+// P5 eval — run `__p5Check()` in the console (mechanical DoD gates + divergence).
+import('./world/p5Check').then(m => { (window as any).__p5Check = m.runP5Check; });
 // P3 data-home probe — runs in the GAME's module context (shares the real
 // `world` + `buildMap`), so it's immune to console dynamic-import instancing.
 // Non-destructive: injects a throwaway runtime location + connection, checks

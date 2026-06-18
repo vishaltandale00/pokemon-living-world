@@ -58,7 +58,7 @@ function reachableSet(grid: number[][]): Set<string> {
 }
 
 // GLOBAL reachability invariant: every building's door-approach must be reachable.
-function reachabilityOK(state: WorldState, mapId: string): boolean {
+export function reachabilityOK(state: WorldState, mapId: string): boolean {
   const grid = collisionGrid(state, mapId);
   const set = reachableSet(grid);
   for (const b of Object.values(state.buildings)) {

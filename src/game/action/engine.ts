@@ -357,6 +357,10 @@ export class ActionEngine {
 
   private hurt(n: number) {
     const p = this.p, b = this.b;
+    // single-hit cap so an over-leveled boss can't one-shot a frail mon, plus a
+    // last-stand: a clean burst from healthy leaves you at 1 instead of dead.
+    n = Math.min(n, Math.ceil(p.maxHp * 0.55));
+    if (p.hp - n <= 0 && p.hp > p.maxHp * 0.35) n = p.hp - 1;
     p.hp = clamp(p.hp - n, 0, p.maxHp); p.combo = 0; p.comboT = 0; p.chain = 0;
     this.shake = 13; this.hitstop = 95; this.flash = 110; this.zoom = 1.06;
     const k = norm(p.x - b.x, p.y - b.y); this.kickX = k.x * 11; this.kickY = k.y * 11;

@@ -74,35 +74,23 @@ export function vfxEl(type: ActionEl): 'fire' | 'water' | 'grass' | 'electric' |
 export function toActionKit(m: MonsterInstance): ActionKit {
   const s = SPECIES[m.speciesId];
   const speed = clamp(135 + (m.spd - 18) * 2.2, 122, 205);
-  const specials: ActionSpecial[] = m.moves
-    .filter(id => id !== 'tackle' && MOVES[id])
-    .slice(0, 2)
-    .map((id, i): ActionSpecial => {
-      const mv = MOVES[id];
-      return {
-        slot: i === 0 ? 'I' : 'U',
-        name: mv.name,
-        kind: 'projectile',
-        el: mv.type,
-        dmg: Math.max(6, Math.round(mv.power * 0.5)),
-        posture: Math.max(6, Math.round(mv.power * 0.5)),
-        range: 330,
-        speed: 560,
-        count: 1,
-        spread: 0,
-        pr: 8,
-        cd: 3200,
-        sta: 20,
-      };
-    });
-  // Everyone gets at least one ranged option, even pure-normal movesets.
-  if (specials.length === 0) {
-    specials.push({
-      slot: 'I', name: 'Focus Shot', kind: 'projectile', el: null,
-      dmg: Math.max(6, Math.round(m.atk * 0.6)), posture: Math.max(6, Math.round(m.atk * 0.4)),
-      range: 300, speed: 520, count: 1, spread: 0, pr: 8, cd: 3000, sta: 18,
-    });
+  // Specials: derive 2-3 ranged options so the U/I/O binds are all real (decision
+  // D2) WITHOUT touching the world's move data. Damage scales with the owner's atk
+  // so a typed special stays relevant at every level (not flat power*0.5).
+  const sdmg = (power: number) => Math.max(8, Math.round((power / 100) * (m.atk * 1.7 + 8)));
+  const spost = (power: number) => Math.max(6, Math.round(power * 0.5));
+  const raw: Omit<ActionSpecial, 'slot'>[] = [];
+  for (const id of m.moves) {
+    if (id === 'tackle' || !MOVES[id]) continue;
+    const mv = MOVES[id];
+    raw.push({ name: mv.name, kind: 'projectile', el: mv.type, dmg: sdmg(mv.power), posture: spost(mv.power), range: 330, speed: 560, count: 1, spread: 0, pr: 8, cd: 3200, sta: 20 });
   }
+  // a heavy physical option everyone gets (slow, big single hit)
+  if (raw.length < 3) raw.push({ name: 'Power Shot', kind: 'projectile', el: null, dmg: Math.max(8, Math.round(m.atk * 0.95)), posture: Math.max(8, Math.round(m.atk * 0.4)), range: 290, speed: 440, count: 1, spread: 0, pr: 11, cd: 4200, sta: 24 });
+  // ensure a 2nd option for movesets with no typed move (pure-normal types)
+  if (raw.length < 2) raw.push({ name: 'Quick Shot', kind: 'projectile', el: null, dmg: Math.max(6, Math.round(m.atk * 0.5)), posture: Math.max(5, Math.round(m.atk * 0.3)), range: 320, speed: 600, count: 2, spread: 0.12, pr: 6, cd: 2600, sta: 16 });
+  const SLOTS: ('I' | 'U' | 'O')[] = ['I', 'U', 'O'];
+  const specials: ActionSpecial[] = raw.slice(0, 3).map((s, i) => ({ ...s, slot: SLOTS[i] }));
   return {
     name: s.name,
     dexId: s.dexId,

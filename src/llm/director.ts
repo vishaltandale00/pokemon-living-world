@@ -1,8 +1,10 @@
 import { chatJSON, hasKey } from './client';
 import { world } from '../world/store';
 import type { DirectorProposal, Development } from '../world/types';
-import { currentChapter, objectiveHint } from '../world/story';
+import { currentChapter, objectiveHint, storyCriticalIds } from '../world/story';
 import { prefetchOpenings, bumpCacheGen } from './dialogueCache';
+import { runKernelTick } from '../world/kernel';
+import { structuralOps } from '../world/structuralOps';
 
 // The Director: once per in-game day, reads the world digest and proposes
 // 1-4 developments. The sim validates everything. This is where emergent
@@ -102,6 +104,12 @@ export async function runWorldTick(): Promise<TickResult> {
   // expire stale offers; reset daily battle flags
   s.pendingOffers = s.pendingOffers.filter(o => o.expiresDay >= s.day);
   Object.values(s.npcs).forEach(n => { n.defeated = false; });
+
+  // KERNEL TICK: advance the authored bundle's accretion/rules ONE day. Runs the
+  // fixed instruction set under the execution contract (capped channels, frozen
+  // two-phase tick) with the story protected-set + the geometric structural ops.
+  // Empty for the pure seed game; this is where emergent consequences accrete.
+  runKernelTick(s, s.rules, { protectedIds: storyCriticalIds(s), ops: structuralOps });
 
   let headlines: string[] = [];
   let usedLLM = false;

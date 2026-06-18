@@ -47,6 +47,8 @@ export class WorldStore {
       // structural-op data homes for saves that predate P3
       if (!state.connections) state.connections = [];
       if (!state.mapLayouts) state.mapLayouts = {};
+      // authored rule bundle for saves that predate P4
+      if (!state.rules) state.rules = [];
       // migrate NPCs to interiors: add any new NPCs (nurses/clerk) the save is
       // missing, and relocate the structural cast to their canonical spots so
       // gym leaders / Oak / Sal actually live inside their buildings

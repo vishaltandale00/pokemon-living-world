@@ -4,7 +4,7 @@
 
 import type { DialogueTurn } from './dialogueContent';
 import type { RngState } from './rng';
-import type { EntityRegistry } from './entity';
+import type { EntityRegistry, Rule } from './entity';
 
 export type FactionId = 'league' | 'rocket' | 'townsfolk' | 'rangers';
 
@@ -157,6 +157,8 @@ export interface WorldState {
   // ——— structural-op data homes (P3): runtime geometry the ops write ———
   connections: Connection[];               // edges wireConnection lays; merged into buildMap exits
   mapLayouts: Record<string, string[]>;    // runtime ASCII layouts for createLocation'd map nodes
+  // ——— authored language bundle (P4/P5): rules the kernel runs each day ———
+  rules: Rule[];                           // admitted via propose-then-dispose; [] for the pure seed game
 }
 
 // A walkable edge between two overworld tiles (bidirectional pairs are stored as

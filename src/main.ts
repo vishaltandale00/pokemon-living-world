@@ -7,6 +7,7 @@ import { getConfig, setConfig, testConnection } from './llm/client';
 import { world } from './world/store';
 import { runDeterminismCheck } from './world/determinismCheck';
 import { runKernelCheck } from './world/kernelCheck';
+import { installHarness } from './world/harness';
 import { MAP_W, MAP_H, TILE, T, buildMap } from './game/maps';
 
 const game = new Phaser.Game({
@@ -93,6 +94,8 @@ $('journal-close').onclick = closeJournal;
 (window as any).__determinismCheck = runDeterminismCheck;
 // P2 kernel contract checks — run `__kernelCheck()` in the console.
 (window as any).__kernelCheck = runKernelCheck;
+// P4 simulation harness — window.harness = { observe, act, snapshot }.
+installHarness();
 // P3 data-home probe — runs in the GAME's module context (shares the real
 // `world` + `buildMap`), so it's immune to console dynamic-import instancing.
 // Non-destructive: injects a throwaway runtime location + connection, checks

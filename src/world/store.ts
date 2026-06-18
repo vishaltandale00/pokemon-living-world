@@ -1,5 +1,6 @@
 import type { WorldState, WorldEvent, Development, RoleSlot, Reputation, Building } from './types';
 import { createSeedWorld } from './seed';
+import { nextUnit } from './rng';
 
 // The simulation core. Owns the world state, validates ALL mutations
 // (including LLM director proposals), persists to localStorage.
@@ -9,9 +10,14 @@ const SAVE_KEY = 'living-kanto-save-v1';
 export class WorldStore {
   state: WorldState;
   private listeners: (() => void)[] = [];
+  private persist: boolean;
 
-  constructor() {
-    this.state = this.load() ?? createSeedWorld();
+  // `persist` defaults true (the real game, backed by localStorage). Pass an
+  // explicit `initial` state + persist=false to get a detached store for tests
+  // and the determinism check — it never touches localStorage.
+  constructor(initial?: WorldState, persist = true) {
+    this.persist = persist;
+    this.state = initial ?? this.load() ?? createSeedWorld();
   }
 
   // ——— persistence ———
@@ -30,6 +36,9 @@ export class WorldStore {
           for (const m of npc.party ?? []) if (m.xp === undefined) m.xp = 0;
       }
       if (!state.dialogueCache) state.dialogueCache = {};
+      // determinism anchors for saves that predate P0
+      if (!state.rng) state.rng = { seed: 1, cursors: {} };
+      if (!state.idSeq) state.idSeq = {};
       // migrate NPCs to interiors: add any new NPCs (nurses/clerk) the save is
       // missing, and relocate the structural cast to their canonical spots so
       // gym leaders / Oak / Sal actually live inside their buildings
@@ -46,8 +55,24 @@ export class WorldStore {
       return state;
     } catch { return null; }
   }
-  save() { localStorage.setItem(SAVE_KEY, JSON.stringify(this.state)); }
-  reset() { localStorage.removeItem(SAVE_KEY); this.state = createSeedWorld(); this.save(); this.emit(); }
+  save() { if (this.persist) localStorage.setItem(SAVE_KEY, JSON.stringify(this.state)); }
+  reset(seed?: number) { if (this.persist) localStorage.removeItem(SAVE_KEY); this.state = createSeedWorld(seed); this.save(); this.emit(); }
+
+  // ——— deterministic RNG + ids (world-sim layer; see world/rng.ts) ———
+  // Every save-reaching random choice draws from a NAMED stream so runs are
+  // reproducible from (seed, actions) and streams don't desync each other.
+  private unit(stream: string): number { return nextUnit(this.state.rng, stream); }
+  rngInt(stream: string, loInclusive: number, hiExclusive: number): number {
+    return loInclusive + Math.floor(this.unit(stream) * (hiExclusive - loInclusive));
+  }
+  rngChance(stream: string, p: number): boolean { return this.unit(stream) < p; }
+  rngPick<T>(stream: string, arr: T[]): T { return arr[Math.floor(this.unit(stream) * arr.length)]; }
+  // Deterministic unique id (replaces Date.now-based ids): `${prefix}_${n}`.
+  nextId(prefix: string): string {
+    const n = (this.state.idSeq[prefix] ?? 0) + 1;
+    this.state.idSeq[prefix] = n;
+    return `${prefix}_${n}`;
+  }
 
   onChange(fn: () => void) { this.listeners.push(fn); }
   private emit() { this.listeners.forEach(f => f()); }
@@ -154,7 +179,7 @@ export class WorldStore {
         if (!slot || !from || slot.holder === 'player') return null;
         if (this.state.pendingOffers.some(o => o.slotId === d.slotId)) return null;
         this.state.pendingOffers.push({
-          id: `offer_${Date.now()}`, slotId: d.slotId, fromNpc: d.fromNpc,
+          id: this.nextId('offer'), slotId: d.slotId, fromNpc: d.fromNpc,
           text: d.text.slice(0, 200), expiresDay: this.state.day + 5,
         });
         this.logEvent('role_offer', `${from.name} extends an opportunity: ${slot.title}.`);
@@ -187,7 +212,7 @@ export class WorldStore {
       // Procedural placement: find a free rect on the town map (validated against existing buildings)
       const spot = this.findBuildingSpot(d.town);
       if (!spot) return null;
-      const id = `bld_${d.town}_${Date.now()}`;
+      const id = this.nextId(`bld_${d.town}`);
       const b: Building = {
         id, kind: d.buildingKind, name: d.name.slice(0, 40), map: d.town,
         x: spot.x, y: spot.y, w: spot.w, h: spot.h,
@@ -200,7 +225,7 @@ export class WorldStore {
       // damage/repair/ruin an existing building in that town
       const targets = Object.values(this.state.buildings).filter(b => b.map === d.town);
       if (!targets.length) return null;
-      const b = targets[Math.floor(Math.random() * targets.length)];
+      const b = this.rngPick('bld_target', targets);
       const map: Record<string, Building['condition']> = { damage: 'damaged', repair: 'normal', ruin: 'ruined' };
       b.condition = map[d.action] ?? b.condition;
       this.logEvent('building_change', `${b.name} is now ${b.condition}: ${d.reason}`);
@@ -212,8 +237,8 @@ export class WorldStore {
     const w = 4, h = 3;
     const existing = Object.values(this.state.buildings).filter(b => b.map === mapId);
     for (let attempt = 0; attempt < 40; attempt++) {
-      const x = 3 + Math.floor(Math.random() * 18);
-      const y = 3 + Math.floor(Math.random() * 14);
+      const x = 3 + this.rngInt('bld_spot', 0, 18);
+      const y = 3 + this.rngInt('bld_spot', 0, 14);
       const clash = existing.some(b => x < b.x + b.w + 1 && x + w + 1 > b.x && y < b.y + b.h + 1 && y + h + 1 > b.y);
       if (!clash) return { x, y, w, h };
     }

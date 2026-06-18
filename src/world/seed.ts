@@ -9,7 +9,11 @@ function npc(p: Partial<NPC> & Pick<NPC, 'id' | 'name' | 'faction' | 'role' | 't
   return { sprite: 0, party: [], defeated: false, attitude: 0, ...p };
 }
 
-export function createSeedWorld(): WorldState {
+// `seed` anchors the world-sim's deterministic RNG. It defaults to a constant so
+// the seed game is reproducible; a new game or the sim harness can pass an
+// explicit seed to diverge. (A production new-game may mint the seed once from an
+// entropy source — that's allowed: the seed is the replay anchor, not replayed.)
+export function createSeedWorld(seed = 1): WorldState {
   const npcs: Record<string, NPC> = {};
   const add = (n: NPC) => { npcs[n.id] = n; };
 
@@ -104,6 +108,8 @@ export function createSeedWorld(): WorldState {
     },
     npcs, slots, towns, buildings,
     dialogueCache: {},
+    rng: { seed, cursors: {} },
+    idSeq: {},
     events: [
       { day: 0, kind: 'world_news', summary: 'A new trainer arrived in Viridian City with a single Charmander.' },
     ],

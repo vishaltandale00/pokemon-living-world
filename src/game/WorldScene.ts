@@ -310,7 +310,7 @@ export class WorldScene extends Phaser.Scene {
         this.moving = false;
         world.save();
         // wild encounter in tall grass (overworld only)
-        if (this.mapData.tiles[ny][nx] === T.TALLGRASS && Math.random() < 0.12) this.startWildBattle();
+        if (this.mapData.tiles[ny][nx] === T.TALLGRASS && world.rngChance('encounter', 0.12)) this.startWildBattle();
       },
     });
   }
@@ -609,8 +609,8 @@ export class WorldScene extends Phaser.Scene {
 
   private startWildBattle() {
     const pool = ['rattata', 'pidgey', 'pikachu', 'gastly'];
-    const sp = pool[Math.floor(Math.random() * pool.length)];
-    const lvl = 4 + Math.floor(Math.random() * 5);
+    const sp = world.rngPick('wild_species', pool);
+    const lvl = 4 + world.rngInt('wild_level', 0, 5);
     this.scene.pause();
     this.scene.launch('actionBattle', { kind: 'wild', wild: makeMonster(sp, lvl) });
   }

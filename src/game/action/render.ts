@@ -171,6 +171,7 @@ export class BattleRenderer {
     const breath = 0.035 * Math.sin(time * 0.0026);              // idle breathing
     // volume-ish squash: hit flattens wide, breath rises tall, attack stretches forward
     g.scale(fdir * scale * atk * (1 - breath) * (1 + 0.22 * hit), scale / atk * (1 + breath) * (1 - 0.22 * hit));
+    g.imageSmoothingEnabled = false; // crisp pixel-art sprites (restored by g.restore())
     if (img && img.complete && img.width) {
       const w = img.width, h = img.height;
       g.drawImage(img, -w / 2, -h + 8); // feet near origin
@@ -200,6 +201,7 @@ export class BattleRenderer {
     g.translate(lean * (p.dir || 1) + rec.x * hurt * 6, bob + rec.y * hurt * 6);
     if (p.inv > 0) g.globalAlpha = 0.55 + 0.25 * Math.sin(time * 0.04);
     g.scale((p.dir || 1) * sq * (1 - breath) * (1 + 0.2 * hurt) * sc, (1 / sq) * (1 + breath) * (1 - 0.2 * hurt) * sc);
+    g.imageSmoothingEnabled = false; // crisp pixel-art sprites (restored by g.restore())
     if (img && img.complete && img.width) {
       g.drawImage(img, -img.width / 2, -img.height + 6);
     } else {

@@ -12,6 +12,9 @@ import type { NPC } from '../world/types';
 
 const MAX_ENTRIES = 80;     // bound the cache (openings + warmed follow-ups)
 const PREFETCH_CONCURRENCY = 2;
+// Bump when the dialogue PROMPT changes so stale cached turns auto-invalidate
+// (the sig is part of every cache entry; a new version => every read misses).
+const DIALOGUE_PROMPT_VERSION = 'v2-voice';
 
 // bumped each world tick; a prefetch batch from a previous day stops itself
 let cacheGen = 0;
@@ -37,6 +40,7 @@ export function openingSig(npc: NPC): string {
   const events = world.recentEvents(20).map(e => `${e.day}:${e.summary}`).join('|');
   const rumors = s.rumors.slice(0, 4).join('|');
   const raw = [
+    DIALOGUE_PROMPT_VERSION,
     npc.id, chapter, p.badges,
     r.league, r.rocket, r.civic, r.research,
     npc.attitude, npc.defeated ? 1 : 0, npc.party.length,

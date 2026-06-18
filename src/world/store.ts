@@ -42,6 +42,8 @@ export class WorldStore {
       if (!state.idSeq) state.idSeq = {};
       // kernel Entity substrate for saves that predate P1 (derive from structs)
       if (!state.entities) state.entities = buildEntitiesFromWorld(state);
+      // kernel runtime for saves that predate P2
+      if (!state.kernel) state.kernel = { lastFired: {}, channelDay: 0, channelUsed: {}, deferred: [] };
       // migrate NPCs to interiors: add any new NPCs (nurses/clerk) the save is
       // missing, and relocate the structural cast to their canonical spots so
       // gym leaders / Oak / Sal actually live inside their buildings

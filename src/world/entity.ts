@@ -14,7 +14,7 @@
 //
 // Serialization is canonical for determinism: `tags` is a SORTED string[] (never
 // a Set), `attrs` a plain record — both JSON round-trip byte-identically.
-import type { WorldState, FactionId } from './types';
+import type { WorldState, FactionId, Reputation } from './types';
 
 export interface Edge {
   to: string;       // target entity id
@@ -22,14 +22,56 @@ export interface Edge {
   weight: number;
 }
 
-// Authored threshold ladder on a channel. The effect lists are evaluated by the
-// P2 tick; their full DSL lands with the kernel, so they're carried opaquely now.
-export interface EffectSpec { op: string; args: Record<string, unknown>; }
+// ——— the closed kernel DSL (authored bundles are written PURELY in this) ———
+// Co-located with Entity because Threshold lives on the entity. The kernel
+// (world/kernel.ts) evaluates these; it has no other type to import.
+export type Ref = { id: string } | { var: 'each' } | { self: true };
+
+export type Predicate =
+  | { t: 'and'; of: Predicate[] }
+  | { t: 'or'; of: Predicate[] }
+  | { t: 'not'; of: Predicate }
+  | { t: 'magnitudeAtLeast'; e: Ref; n: number }
+  | { t: 'attrAtLeast'; e: Ref; key: string; n: number }
+  | { t: 'attrEquals'; e: Ref; key: string; v: string | number | boolean }
+  | { t: 'hasTag'; e: Ref; tag: string }
+  | { t: 'relationAtLeast'; a: Ref; b: Ref; rel: string; n: number }
+  | { t: 'playerHasRole'; role: string }
+  | { t: 'playerRepAtLeast'; axis: keyof Reputation; n: number }
+  | { t: 'playerControls'; e: Ref }
+  | { t: 'controlledBy'; e: Ref; faction: string }
+  | { t: 'daysSince'; eventKey: string; n: number }
+  | { t: 'countMatching'; match: Predicate; n: number }
+  | { t: 'exists'; id: string };
+
+export type Effect =
+  | { t: 'addMagnitude'; e: Ref; delta: number }
+  | { t: 'addAttr'; e: Ref; key: string; delta: number }
+  | { t: 'setAttr'; e: Ref; key: string; v: string | number | boolean }
+  | { t: 'clampedRep'; axis: keyof Reputation; delta: number }
+  | { t: 'addRelation'; a: Ref; b: Ref; rel: string; delta: number }
+  | { t: 'setTag'; e: Ref; tag: string }
+  | { t: 'clearTag'; e: Ref; tag: string }
+  | { t: 'logEvent'; key: string }
+  | { t: 'retireEntity'; e: Ref }
+  | { t: 'spawnEntity'; id: string; entityType: string; tags: string[]; attrs: Record<string, number | string | boolean>; atLocation?: string }
+  | { t: 'transferControl'; e: Ref; toFaction: string };
+
+// Authored threshold ladder on a channel; fired by the two-phase tick.
 export interface Threshold {
   channel: string;          // 'magnitude' or a named attr key
   level: number;
-  up: EffectSpec[];
-  down: EffectSpec[];
+  up: Effect[];
+  down: Effect[];
+}
+
+export interface Rule {
+  id: string;
+  when: Predicate;
+  forEach?: Predicate;      // binds 'each'; frozen, id-ordered match-set
+  then: Effect[];
+  throttleDays: number;     // min days between firings (0 = every day)
+  source?: 'kernel' | 'authored';
 }
 
 export interface Entity {

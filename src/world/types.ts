@@ -152,7 +152,18 @@ export interface WorldState {
   idSeq: Record<string, number>; // per-prefix monotonic id counters (replaces Date.now ids)
   // ——— kernel substrate (P1): every game object as an open Entity ———
   entities: EntityRegistry;      // derived from structs in P1a; tick-owned from P2 (see world/entity.ts)
+  // ——— kernel runtime (P2): persisted so a half-grown world resumes identically ———
+  kernel: KernelState;
 }
+
+// Per-tick/per-day runtime the kernel carries IN the save (reload-deterministic).
+export interface KernelState {
+  lastFired: Record<string, number>;    // ruleId -> day it last fired (throttle)
+  channelDay: number;                    // the day `channelUsed` budgets apply to
+  channelUsed: Record<string, number>;   // `${entityId}|${channel}` -> abs delta spent this day (velocity cap)
+  deferred: DeferredDelta[];             // cross-entity threshold bumps, applied (re-capped) NEXT tick
+}
+export interface DeferredDelta { id: string; channel: string; delta: number; }
 
 export interface RoleOffer {
   id: string;

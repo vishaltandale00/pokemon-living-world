@@ -6,6 +6,7 @@ import { ActionBattleScene } from './game/ActionBattleScene';
 import { getConfig, setConfig, testConnection } from './llm/client';
 import { world } from './world/store';
 import { runDeterminismCheck } from './world/determinismCheck';
+import { runKernelCheck } from './world/kernelCheck';
 import { MAP_W, MAP_H, TILE } from './game/maps';
 
 const game = new Phaser.Game({
@@ -90,6 +91,8 @@ $('journal-close').onclick = closeJournal;
 (window as any).showJournal = showJournal;
 // P0 determinism acceptance check — run `__determinismCheck()` in the console.
 (window as any).__determinismCheck = runDeterminismCheck;
+// P2 kernel contract checks — run `__kernelCheck()` in the console.
+(window as any).__kernelCheck = runKernelCheck;
 
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));

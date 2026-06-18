@@ -175,6 +175,7 @@ export class BattleRenderer {
     }
     g.restore(); g.globalAlpha = 1;
     if (p.inv > 0) { g.save(); g.globalCompositeOperation = 'lighter'; g.strokeStyle = `rgba(110,210,255,${0.4 + 0.3 * Math.sin(time * 0.03)})`; g.lineWidth = 2; g.beginPath(); g.arc(p.x, p.y, 26, 0, TAU); g.stroke(); g.restore(); }
+    if (p.heal) { g.save(); g.globalCompositeOperation = 'lighter'; const k = 1 - p.heal.t / p.heal.dur; g.globalAlpha = 0.5; g.drawImage(this.GLOW_GRASS, p.x - 30, p.y - 44, 60, 60); g.globalAlpha = 1; g.strokeStyle = 'rgba(150,230,150,.55)'; g.lineWidth = 2.4; g.beginPath(); g.arc(p.x, p.y, 12 + k * 24, 0, TAU); g.stroke(); g.restore(); }
     if (p.just > 0) { g.save(); g.globalCompositeOperation = 'lighter'; const k = p.just / 700; g.strokeStyle = `rgba(120,210,255,${0.35 * k})`; g.lineWidth = 2; for (let i = 0; i < 4; i++) { const oy = -14 + i * 9; g.beginPath(); g.moveTo(p.x - (p.dir || 1) * 16, p.y + oy); g.lineTo(p.x - (p.dir || 1) * (34 + i * 4), p.y + oy); g.stroke(); } g.restore(); }
     this.drawSlash(g, eng);
     if (p.combo >= 2) {
@@ -271,6 +272,10 @@ export class BattleRenderer {
     this.bar(g, 24, 58, 176, 7, p.stamina, p.maxStamina, p.stamina < 24 ? '#ef5148' : '#e9c45f');
     let sx = 24; const sy = 72;
     for (const s of p.kit.specials) { this.drawSlot(g, sx, sy, eng, s.slot, s.name); sx += 92; }
+    // potion / heal indicator
+    g.font = '10px ui-monospace, monospace'; g.textAlign = 'left';
+    g.fillStyle = eng.potions > 0 ? '#8fe0a0' : '#5d7180';
+    g.fillText(`H  Potion ×${eng.potions}`, sx + 2, sy + 12);
     // boss (top-center)
     const bw = 420, bx = W / 2 - bw / 2, by = 30; g.textAlign = 'center'; g.font = 'bold 15px ui-monospace, monospace'; g.fillStyle = '#e7eef3'; g.fillText(b.name.toUpperCase(), W / 2, by - 8);
     for (let i = 0; i < 3; i++) { const px = bx + bw - 8 - i * 15, py = by - 13; g.save(); g.translate(px, py); g.rotate(Math.PI / 4); g.fillStyle = i < b.phase ? (b.phase >= 3 ? '#ef5148' : b.phase >= 2 ? '#eccb73' : '#9fb6c2') : 'rgba(120,150,170,.25)'; g.fillRect(-4, -4, 8, 8); g.restore(); }
@@ -280,7 +285,7 @@ export class BattleRenderer {
     // log + controls
     this.rr(g, 24, H - 30, W - 48, 22, 6); g.fillStyle = 'rgba(7,11,15,.82)'; g.fill(); g.strokeStyle = 'rgba(120,160,180,.3)'; g.lineWidth = 1; g.stroke();
     g.textAlign = 'left'; g.fillStyle = '#dfeaf0'; g.font = '12px ui-monospace, monospace'; g.fillText(eng.log, 36, H - 15);
-    const ctl = 'WASD move · J light · K heavy · L dodge · I/U special' + (eng.isWildBattle ? ' · C catch · F flee' : '');
+    const ctl = 'WASD move · J light · K heavy · L dodge · I/U special · H heal' + (eng.isWildBattle ? ' · C catch · F flee' : '');
     g.textAlign = 'right'; g.fillStyle = '#7f97a6'; g.font = '10px ui-monospace, monospace'; g.fillText(ctl, W - 36, H - 15); g.textAlign = 'left';
   }
   private drawSlot(g: CanvasRenderingContext2D, x: number, y: number, eng: ActionEngine, slot: string, name: string) {

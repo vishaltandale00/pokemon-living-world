@@ -8,6 +8,7 @@ import { toActionKit, toBossKit } from './action/kit';
 import { applyBattleOutcome, awardXp, catchChance, type BattleOutcome, type OutcomeCtx } from '../world/battleOutcome';
 
 interface BattleData { kind: 'npc' | 'wild'; npcId?: string; wild?: MonsterInstance }
+const POTION_HEAL = 35;
 
 // Real-time action battle. Fully replaces the menu BattleScene: same init payload
 // and the same pause→launch→resume('world', {battleResult}) handshake, so world
@@ -108,7 +109,7 @@ export class ActionBattleScene extends Phaser.Scene {
     // and never leak into the paused WorldScene. Phaser's own keyboard is disabled
     // for the duration so it can't double-handle.
     this.game.input.keyboard!.enabled = false;
-    const HANDLED = new Set(['w', 'a', 's', 'd', 'j', 'k', 'l', 'u', 'i', 'o', 'c', 'f', ' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'escape']);
+    const HANDLED = new Set(['w', 'a', 's', 'd', 'j', 'k', 'l', 'u', 'i', 'o', 'h', 'c', 'f', ' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'escape']);
     this.onKeyDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       if (!HANDLED.has(k)) return;
@@ -122,6 +123,7 @@ export class ActionBattleScene extends Phaser.Scene {
         case 'u': this.engine.onPress('U'); break;
         case 'i': this.engine.onPress('I'); break;
         case 'o': this.engine.onPress('O'); break;
+        case 'h': this.tryHeal(); break;
         case 'c': if (this.isWild) this.engine.onPress('catch'); break;
         case 'f': case 'escape':
           if (this.isWild) this.engine.onPress('flee');
@@ -165,6 +167,7 @@ export class ActionBattleScene extends Phaser.Scene {
     const U = this.held.has('w') || this.held.has('arrowup');
     const D = this.held.has('s') || this.held.has('arrowdown');
     this.engine.setMove((R ? 1 : 0) - (L ? 1 : 0), (D ? 1 : 0) - (U ? 1 : 0));
+    this.engine.potions = world.state.player.items.potion ?? 0;
 
     this.engine.step(time);
     this.handleRequests();
@@ -199,6 +202,14 @@ export class ActionBattleScene extends Phaser.Scene {
       this.engine.fleeRequested = false;
       this.tryFlee();
     }
+  }
+
+  private tryHeal() {
+    const items = world.state.player.items;
+    if (!items.potion) { this.engine.setLog('No Potions left! Buy more at the Mart.'); return; }
+    if (!this.engine.startHeal(POTION_HEAL)) return;   // busy / full HP → don't spend the item
+    items.potion -= 1;
+    world.save();
   }
 
   private tryCatch() {

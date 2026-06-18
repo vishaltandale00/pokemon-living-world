@@ -47,7 +47,7 @@ If the browser extension is unavailable, mark the gate `- [ ] (BLOCKED: needs li
 - [x] specials scale with owner level/atk (not flat `power*0.5`) so type advantage stays relevant past ~Lv10
 - [x] (D2) give each mon 2–3 action specials derived in the kit; every advertised U/I/O bind is live
 - [x] single-hit damage cap / last-stand-at-1 so a frail mon can't be one-shot by an over-leveled boss
-- [ ] (D1) heal action bound to a key that spends a Potion via a vulnerable channel (party-empty / no-potion guards)
+- [x] (D1) heal action (H) spends a Potion via a 700ms vulnerable channel; no-potion / full-HP / busy guards; a hit interrupts it
 
 ## D. Balance & feel
 - [ ] time-to-kill normalized: skilled-bot sim kills any role-appropriate boss within a target band (~10–25s / ~8–22 hits) across all 13 species

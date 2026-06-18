@@ -43,6 +43,7 @@ export interface PlayerState {
   faceX: number; faceY: number; dir: number; moving: boolean;
   dodge: number; inv: number; vx: number; vy: number;
   atk: PlayerAttack | null;
+  heal: { t: number; dur: number; amount: number } | null;
   cd: Record<string, number>; cdMax: Record<string, number>;
   refunded: Record<string, boolean>; regenLock: number;
   combo: number; comboT: number; chain: number; dead: number; just: number;
@@ -76,7 +77,7 @@ function freshPlayer(kit: ActionKit): PlayerState {
     kit, x: 300, y: 372, r: 14, hp: kit.hp, maxHp: kit.hp, hpShown: kit.hp,
     stamina: 100, maxStamina: 100, focus: 0, maxFocus: 100,
     faceX: 1, faceY: 0, dir: 1, moving: false,
-    dodge: 0, inv: 0, vx: 0, vy: 0, atk: null,
+    dodge: 0, inv: 0, vx: 0, vy: 0, atk: null, heal: null,
     cd: { U: 0, I: 0, O: 0 }, cdMax: {}, refunded: { U: false, I: false, O: false }, regenLock: 0,
     combo: 0, comboT: 0, chain: 0, dead: 0, just: 0,
   };
@@ -107,6 +108,7 @@ export class ActionEngine {
   winT = 0; comboPop = 0;
   log = '';
   isWildBattle = false;   // set by the scene; drives the catch/flee HUD hint
+  potions = 0;            // set by the scene each frame; drives the heal HUD count
 
   fx: Particle[] = []; texts: FloatText[] = []; ghosts: Ghost[] = [];
   decals: Particle[] = []; shots: Shot[] = []; dust: Particle[] = [];
@@ -171,7 +173,18 @@ export class ActionEngine {
   // ——— combat ———
   private input() { return this.mv; }
   private aim() { const v = this.mv; if (v.x || v.y) return v; return norm(this.b.x - this.p.x, this.b.y - this.p.y); }
-  private busy() { const p = this.p; return !!(p.dead || this.winT > 0 || p.atk); }
+  private busy() { const p = this.p; return !!(p.dead || this.winT > 0 || p.atk || p.heal); }
+
+  // Begin a Potion channel. Returns false (so the scene doesn't spend the item) if
+  // the player can't heal right now or is already at full HP. Vulnerable: a hit cancels it.
+  startHeal(amount: number): boolean {
+    const p = this.p;
+    if (this.phase !== 'fighting' || this.busy() || p.dodge > 0) return false;
+    if (p.hp >= p.maxHp) { this.pulseText(p.x, p.y - 36, 'full HP', '150,200,160', 12); return false; }
+    p.heal = { t: 700, dur: 700, amount };
+    this.log = 'Drinking a Potion — hold steady!';
+    return true;
+  }
 
   private bodyHit(x: number, y: number, fx: number, fy: number, reach: number, cosArc: number) {
     const b = this.b; const dx = b.x - x, dy = b.y - y, l = hyp(dx, dy); const dd = l - b.r;
@@ -357,6 +370,7 @@ export class ActionEngine {
 
   private hurt(n: number) {
     const p = this.p, b = this.b;
+    if (p.heal) { p.heal = null; this.pulseText(p.x, p.y - 40, 'interrupted!', '220,180,120', 13); }  // a hit cancels the channel
     // single-hit cap so an over-leveled boss can't one-shot a frail mon, plus a
     // last-stand: a clean burst from healthy leaves you at 1 instead of dead.
     n = Math.min(n, Math.ceil(p.maxHp * 0.55));
@@ -378,6 +392,16 @@ export class ActionEngine {
     for (const k of ['U', 'I', 'O']) p.cd[k] = Math.max(0, p.cd[k] - dt);
     if (p.regenLock > 0) p.regenLock -= dt;
     this.dodgeBuf = Math.max(0, this.dodgeBuf - dt); this.atkBuf = Math.max(0, this.atkBuf - dt);
+
+    // Potion channel: locked + vulnerable while drinking (a hit cancels it in hurt())
+    if (p.heal) {
+      p.heal.t -= dt;
+      p.hp = clamp(p.hp + p.heal.amount * dt / p.heal.dur, 0, p.maxHp);
+      if (Math.random() < 0.4 && this.fx.length < 260) this.fx.push({ type: 'ember', x: p.x + rnd(-12, 12), y: p.y + rnd(-4, 10), vx: rnd(-8, 8), vy: rnd(-50, -20), life: rnd(400, 800), max: 800, col: '160,230,150', w: 2 });
+      if (p.heal.t <= 0) { this.pulseText(p.x, p.y - 40, '+' + Math.round(p.heal.amount), '120,230,150', 18); p.heal = null; }
+      this.clampPos();
+      return;
+    }
 
     if (!p.atk && p.dodge <= 0 && p.regenLock <= 0) p.stamina = clamp(p.stamina + dt * p.kit.regen, 0, p.maxStamina);
     if (this.dodgeBuf > 0 && this.tryDodge()) this.dodgeBuf = 0;

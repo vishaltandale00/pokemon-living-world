@@ -27,6 +27,12 @@ export function setConfig(cfg: LLMConfig) {
 
 export function hasKey(): boolean { return getConfig().apiKey.trim().length > 0; }
 
+// Reasoning effort per tier: the smart tier (nightly Director, bundle authoring,
+// the eval judge) thinks HARD; the fast tier (real-time dialogue) thinks little
+// so replies stay snappy. Sent as OpenRouter's `reasoning.effort` — silently
+// ignored by models that don't support reasoning.
+const TIER_EFFORT: Record<ModelTier, 'low' | 'medium' | 'high'> = { smart: 'high', fast: 'low' };
+
 export async function chatJSON<T>(
   system: string,
   user: string,
@@ -38,6 +44,10 @@ export async function chatJSON<T>(
   const cfg = getConfig();
   if (!cfg.apiKey) throw new Error('no-key');
   const model = tier === 'fast' ? (cfg.fastModel.trim() || cfg.model) : cfg.model;
+  const effort = TIER_EFFORT[tier];
+  // reasoning tokens count toward the completion budget — give high-effort calls
+  // headroom so the JSON answer doesn't get truncated by the thinking.
+  const budget = effort === 'high' ? Math.max(maxTokens, 2500) : maxTokens;
   const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
@@ -47,7 +57,8 @@ export async function chatJSON<T>(
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      max_completion_tokens: maxTokens,
+      max_completion_tokens: budget,
+      reasoning: { effort },
       response_format: {
         type: 'json_schema',
         json_schema: { name: schemaName, strict: true, schema },
@@ -58,7 +69,7 @@ export async function chatJSON<T>(
     const body = await res.text().catch(() => '');
     // Some OpenAI-compatible servers don't support json_schema; retry with json_object
     if (res.status === 400 && /json_schema|response_format/i.test(body)) {
-      return chatJSONFallbackMode<T>(system, user, maxTokens, model);
+      return chatJSONFallbackMode<T>(system, user, budget, model, effort);
     }
     throw new Error(`LLM HTTP ${res.status}: ${body.slice(0, 200)}`);
   }
@@ -67,7 +78,7 @@ export async function chatJSON<T>(
   return JSON.parse(text) as T;
 }
 
-async function chatJSONFallbackMode<T>(system: string, user: string, maxTokens: number, model: string): Promise<T> {
+async function chatJSONFallbackMode<T>(system: string, user: string, maxTokens: number, model: string, effort: 'low' | 'medium' | 'high'): Promise<T> {
   const cfg = getConfig();
   const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
@@ -79,6 +90,7 @@ async function chatJSONFallbackMode<T>(system: string, user: string, maxTokens: 
         { role: 'user', content: user },
       ],
       max_completion_tokens: maxTokens,
+      reasoning: { effort },
       response_format: { type: 'json_object' },
     }),
   });

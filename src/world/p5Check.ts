@@ -8,7 +8,7 @@ import { createSeedWorld } from './seed';
 import { runKernelTick, DEFAULT_CAP } from './kernel';
 import { structuralOps, reachabilityOK } from './structuralOps';
 import { storyCriticalIds } from './story';
-import { WAREHOUSE_BUNDLE, GANG_BUNDLE, RIVALRY_BUNDLE, type AuthoredBundle } from './bundles';
+import { WAREHOUSE_BUNDLE, BUNDLES, type AuthoredBundle } from './bundles';
 import { chatJSON, hasKey } from '../llm/client';
 import type { WorldState } from './types';
 
@@ -66,9 +66,10 @@ export function runP5Check(): P5Result {
   const checks: Check[] = [];
   const add = (name: string, pass: boolean, detail = '') => checks.push({ name, pass, detail });
 
-  const wh = runPlaythrough(42, WAREHOUSE_BUNDLE, 16);
-  const gang = runPlaythrough(42, GANG_BUNDLE, 14);
-  const riv = runPlaythrough(42, RIVALRY_BUNDLE, 14);
+  // sweep ALL authored bundles under the SAME seed
+  const runs = BUNDLES.map(b => ({ id: b.id, run: runPlaythrough(42, b, b.days) }));
+  const byId: Record<string, Run> = Object.fromEntries(runs.map(r => [r.id, r.run]));
+  const wh = byId['warehouse_holdfast'], riv = byId['blue_rivalry'];
 
   // 1) the warehouse ARC materialized end to end
   const whE = wh.state.entities['bld:rocket_warehouse'];
@@ -79,30 +80,30 @@ export function runP5Check(): P5Result {
   add('warehouse arc: seized → fortified → compound → settlement + road', arc,
     `tags=[${whE.tags.join(',')}] playerBld=${playerBld} compoundMap=${!!wh.state.mapLayouts['compound']} road=${road}`);
 
-  // also confirm the rivalry carrier escalated to war + fortified a counter-base
+  // rivalry carrier escalated to war + fortified a counter-base
   const rivE = riv.state.entities['rivalry:blue'];
   const rivWar = !!rivE && rivE.tags.includes('war') && Object.values(riv.state.buildings).some(b => b.owner === 'blue');
   add('rivalry arc: wary → war, rival fortifies a counter-base', rivWar, rivE ? `stage=${rivE.attrs.stage}` : 'no carrier');
 
-  // 2) invariants held on EVERY snapshot of ALL runs
-  const allFail = [...wh.failures, ...gang.failures, ...riv.failures];
-  add('invariants: no-free-minting + reachability + persistence, every snapshot', allFail.length === 0, allFail.slice(0, 3).join(' | '));
+  // 2) invariants held on EVERY snapshot of EVERY run
+  const allFail = runs.flatMap(r => r.run.failures);
+  add(`invariants: no-free-minting + reachability + persistence, every snapshot (${BUNDLES.length} bundles)`, allFail.length === 0, allFail.slice(0, 3).join(' | '));
 
-  // 3) DIVERGENCE: same seed, three different bundles => three structurally
-  // distinct worlds (all fingerprints mutually different).
-  const fpW = fingerprint(wh.state), fpG = fingerprint(gang.state), fpR = fingerprint(riv.state);
-  const distinct = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
-  const allDistinct = distinct(fpW, fpG) && distinct(fpW, fpR) && distinct(fpG, fpR);
-  add('divergence: same seed, 3 bundles → 3 structurally distinct worlds', allDistinct,
-    `wh.loc=[${fpW.locations}] gang.bld=${fpG.newBuildings.length} riv.bld=${fpR.newBuildings.length}`);
+  // 3) DIVERGENCE: same seed, N bundles => N mutually-distinct structural worlds
+  const fps = runs.map(r => ({ id: r.id, fp: fingerprint(r.run.state) }));
+  let allPairsDistinct = true, dupe = '';
+  for (let i = 0; i < fps.length; i++) for (let j = i + 1; j < fps.length; j++) {
+    if (JSON.stringify(fps[i].fp) === JSON.stringify(fps[j].fp)) { allPairsDistinct = false; dupe = `${fps[i].id} == ${fps[j].id}`; }
+  }
+  add(`divergence: same seed, ${BUNDLES.length} bundles → ${BUNDLES.length} structurally distinct worlds`, allPairsDistinct, dupe);
 
   // 4) determinism: same bundle + same seed => byte-identical final world
-  const wh2 = runPlaythrough(42, WAREHOUSE_BUNDLE, 16);
+  const wh2 = runPlaythrough(42, WAREHOUSE_BUNDLE, WAREHOUSE_BUNDLE.days);
   add('determinism: same bundle+seed → byte-identical final world', JSON.stringify(wh.state) === JSON.stringify(wh2.state), '');
 
-  // 5) attribution: the divergence is the BUNDLE's (kernel/seed identical) — a
-  // same-bundle/different-seed pair keeps the same structural skeleton.
-  const whSeedB = runPlaythrough(777, WAREHOUSE_BUNDLE, 16);
+  // 5) attribution: a same-bundle/different-seed pair keeps the structural skeleton
+  const whSeedB = runPlaythrough(777, WAREHOUSE_BUNDLE, WAREHOUSE_BUNDLE.days);
+  const fpW = fingerprint(wh.state);
   const sameSkeleton = JSON.stringify(fingerprint(whSeedB.state).locations) === JSON.stringify(fpW.locations)
     && JSON.stringify(fingerprint(whSeedB.state).connections) === JSON.stringify(fpW.connections);
   add('attribution: same bundle/different seed keeps the structural skeleton', sameSkeleton, '');
@@ -110,7 +111,7 @@ export function runP5Check(): P5Result {
   const ok = checks.every(c => c.pass);
   // eslint-disable-next-line no-console
   console.log('[p5] ' + (ok ? 'ALL PASS' : 'FAIL') + '\n' + checks.map(c => `${c.pass ? '✓' : '✗'} ${c.name}${c.pass ? '' : ' — ' + c.detail}`).join('\n'));
-  return { ok, checks, warehouseArc: wh.snaps, fingerprints: { warehouse: fpW, gang: fpG, rivalry: fpR } };
+  return { ok, checks, warehouseArc: wh.snaps, fingerprints: Object.fromEntries(fps.map(f => [f.id, f.fp])) };
 }
 
 // ——— the QUALITATIVE half of the DoD: the LLM-judge rubric ———
@@ -135,20 +136,17 @@ const JUDGE_SCHEMA = {
 
 export async function runP5Judge(): Promise<Record<string, unknown>> {
   if (!hasKey()) return { ran: false, reason: 'No API key set. Open Settings, add your key, then re-run __p5Judge().' };
-  const runs: [string, AuthoredBundle, number][] = [
-    ['warehouse', WAREHOUSE_BUNDLE, 16], ['gang', GANG_BUNDLE, 14], ['rivalry', RIVALRY_BUNDLE, 14],
-  ];
   const scored: Record<string, unknown>[] = [];
-  for (const [name, b, days] of runs) {
-    const r = runPlaythrough(42, b, days);
+  for (const b of BUNDLES) {
+    const r = runPlaythrough(42, b, b.days);
     const timeline = r.snaps.map(s =>
       `Day ${s.day}: ${Object.entries(s.mag).map(([k, v]) => `${k}=${v}`).join(', ') || '(quiet)'} | tags ${JSON.stringify(s.tags)} | locations ${s.locations} buildings ${s.buildings}`).join('\n');
     try {
       const sc = await chatJSON<{ legibility: number; coherence: number; divergenceConfidence: number; notes: string }>(
         JUDGE_SYSTEM, `BUNDLE: ${b.describe}\n\nTIMELINE:\n${timeline}`, 'p5_judge', JUDGE_SCHEMA as unknown as Record<string, unknown>, 500);
       const norm = (sc.legibility + sc.coherence + sc.divergenceConfidence) / 15;
-      scored.push({ name, ...sc, normalized: Math.round(norm * 100) / 100 });
-    } catch (e) { scored.push({ name, error: String(e) }); }
+      scored.push({ name: b.id, ...sc, normalized: Math.round(norm * 100) / 100 });
+    } catch (e) { scored.push({ name: b.id, error: String(e) }); }
   }
   const normalized = scored.filter(s => typeof s.normalized === 'number').map(s => s.normalized as number);
   const overall = normalized.length ? normalized.reduce((a, b) => a + b, 0) / normalized.length : 0;

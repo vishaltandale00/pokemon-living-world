@@ -10,6 +10,7 @@ import type { WorldState } from './types';
 export interface AuthoredBundle {
   id: string;
   describe: string;
+  days: number;                            // in-game days to drive the arc to its top threshold
   rules: Rule[];
   thresholds: Record<string, Threshold[]>;
   setup?: (s: WorldState) => void;
@@ -23,6 +24,7 @@ const WAREHOUSE = 'bld:rocket_warehouse';
 export const WAREHOUSE_BUNDLE: AuthoredBundle = {
   id: 'warehouse_holdfast',
   describe: 'The player seizes the Pewter warehouse and entrenches it into a compound, then a settlement.',
+  days: 16,
   setup: (s) => {
     const e = s.entities[WAREHOUSE];
     if (e && !e.relations.some(r => r.rel === 'controlledBy' && r.to === 'faction:player')) {
@@ -50,6 +52,7 @@ export const WAREHOUSE_BUNDLE: AuthoredBundle = {
 export const GANG_BUNDLE: AuthoredBundle = {
   id: 'rocket_spread',
   describe: "Team Rocket's reach accretes and plants hideouts across Kanto's towns.",
+  days: 14,
   rules: [
     { id: 'spread', when: { t: 'exists', id: 'faction:rocket' }, then: [{ t: 'addMagnitude', e: { id: 'faction:rocket' }, delta: 6 }], throttleDays: 0 },
   ],
@@ -68,6 +71,7 @@ export const GANG_BUNDLE: AuthoredBundle = {
 export const RIVALRY_BUNDLE: AuthoredBundle = {
   id: 'blue_rivalry',
   describe: 'The feud with Blue escalates from wary to all-out war; at war he fortifies a counter-base.',
+  days: 14,
   setup: (s) => {
     s.entities['rivalry:blue'] = {
       id: 'rivalry:blue', type: 'rivalry', tags: ['feud'], attrs: { stage: 'wary', rival: 'npc:blue' }, magnitude: 0,
@@ -85,4 +89,42 @@ export const RIVALRY_BUNDLE: AuthoredBundle = {
   thresholds: {},
 };
 
-export const BUNDLES: AuthoredBundle[] = [WAREHOUSE_BUNDLE, GANG_BUNDLE, RIVALRY_BUNDLE];
+// SHAPE D — a protective institution. Rangers turn Route 1 into a protected wild
+// sanctuary that calves its own grounds. Distinct: a NEW location seeded from a
+// route (not a town), ranger-owned, no crime, no player holdings.
+const ROUTE1 = 'town:route1';
+export const RANGER_BUNDLE: AuthoredBundle = {
+  id: 'ranger_sanctuary',
+  describe: 'Rangers turn Route 1 into a protected wild sanctuary with its own grounds.',
+  days: 14,
+  rules: [
+    { id: 'protect', when: { t: 'exists', id: ROUTE1 }, then: [{ t: 'addMagnitude', e: { id: ROUTE1 }, delta: 6 }], throttleDays: 0 },
+  ],
+  thresholds: {
+    [ROUTE1]: [
+      { channel: 'magnitude', level: 40, up: [{ t: 'placeBuildingValidly', map: 'route1', kind: 'lab', owner: 'rangers', name: 'Ranger Station' }, { t: 'logEvent', key: 'ranger_station' }], down: [] },
+      { channel: 'magnitude', level: 70, up: [{ t: 'createLocation', newMapId: 'sanctuary', seedMap: 'route1', biome: 'forest', tags: ['ranger_sanctuary'], name: 'Wild Sanctuary' }, { t: 'wireConnection', fromMap: 'sanctuary', fromX: 12, fromY: 18, toMap: 'route1', toX: 12, toY: 1 }, { t: 'logEvent', key: 'sanctuary_opens' }], down: [] },
+    ],
+  },
+};
+
+// SHAPE E — an economic boom (no conflict, no calving). Viridian's prosperity
+// compounds into new homes and shops. Distinct: townsfolk-owned growth, no
+// location, no faction takeover — a peaceful world.
+const VIRIDIAN = 'town:viridian';
+export const BOOM_BUNDLE: AuthoredBundle = {
+  id: 'viridian_boom',
+  describe: 'Viridian booms — new homes and shops rise as prosperity compounds.',
+  days: 13,
+  rules: [
+    { id: 'boom', when: { t: 'exists', id: VIRIDIAN }, then: [{ t: 'addMagnitude', e: { id: VIRIDIAN }, delta: 6 }], throttleDays: 0 },
+  ],
+  thresholds: {
+    [VIRIDIAN]: [
+      { channel: 'magnitude', level: 35, up: [{ t: 'placeBuildingValidly', map: 'viridian', kind: 'house', owner: 'townsfolk', name: 'New Homes' }, { t: 'logEvent', key: 'viridian_grows' }], down: [] },
+      { channel: 'magnitude', level: 65, up: [{ t: 'placeBuildingValidly', map: 'viridian', kind: 'mart', owner: 'townsfolk', name: 'Market Row' }, { t: 'logEvent', key: 'viridian_thrives' }], down: [] },
+    ],
+  },
+};
+
+export const BUNDLES: AuthoredBundle[] = [WAREHOUSE_BUNDLE, GANG_BUNDLE, RIVALRY_BUNDLE, RANGER_BUNDLE, BOOM_BUNDLE];

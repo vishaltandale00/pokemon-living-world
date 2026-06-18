@@ -66,17 +66,20 @@ const OPENAI_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
 const REPLICATE_MODEL = process.env.REPLICATE_MODEL || 'black-forest-labs/flux-kontext-dev';
 const FAL_MODEL = process.env.FAL_MODEL || 'fal-ai/flux-kontext/dev';
+const FAL_MATTE_MODEL = process.env.FAL_MATTE_MODEL || 'fal-ai/birefnet'; // hosted bg-removal → transparency
 const MODEL_LABEL = { openai: OPENAI_MODEL, gemini: GEMINI_MODEL, replicate: REPLICATE_MODEL, fal: FAL_MODEL }[PROVIDER];
 console.log(`Provider: ${PROVIDER} (${MODEL_LABEL})`);
 
 // ——— prompt library ———
-const STYLE = 'Keep the SAME creature — identical species, colors, proportions and shapes. Full body, centered, facing right, clean crisp edges, soft rim light, no ground shadow, no background, fully transparent background. Dynamic, expressive, high-energy action-game creature art that reads at a glance.';
-// NOTE: poses are worded to avoid content-moderation false positives — combat words
-// ("attack", "strike", "hit", "flinch") can trip the safety filter even for a cartoon.
+// Pixel-art direction: keep the reference's clean sprite style + palette. (fal/Kontext has no
+// IP/content filter, so the action poses can be worded directly — unlike OpenAI/Gemini.)
+// CRITICAL: preserve the body plan. Without this, Kontext turns non-bipedal mons
+// (Onix the rock snake, Gastly the gas orb, Lapras, serpents, birds) into humanoids.
+const STYLE = 'Keep the EXACT same creature and its EXACT body plan and silhouette: same number of limbs, same body type — if it is a serpent/snake keep it long and limbless, if it floats keep it floating, if it is a bird keep wings, if a quadruped keep four legs. Do NOT add arms, legs, or a humanoid stance it does not have. Same clean pixel-art sprite style, color palette, and chunky-pixel look as the reference. Crisp readable game-sprite pixel art, full body, centered, on a plain solid flat background.';
 const POSE_PROMPT = {
-  idle: `Redraw this creature in an alert ready idle stance, weight low, looking forward. ${STYLE}`,
-  attack: `Redraw this creature in a lively mid-jump: both feet off the ground, leaping happily up and forward, arms raised with excitement, a joyful energetic expression. ${STYLE}`,
-  hurt: `Redraw this creature with a surprised wide-eyed expression, gently leaning back and tilting its head in astonishment, a little off balance. ${STYLE}`,
+  idle: `Redraw this exact creature in an alert ready stance, looking forward. ${STYLE}`,
+  attack: `Redraw this exact creature surging forward with aggressive energy and momentum — in whatever way ITS OWN body moves (a snake lunges as a snake, a bird dives as a bird) — a dynamic attacking moment. ${STYLE}`,
+  hurt: `Redraw this exact creature reacting to a hit — recoiling/flinching in whatever way ITS OWN body would, off-balance. ${STYLE}`,
 };
 const POSE_FILE = { idle: '_idle', attack: '_atk', hurt: '_hurt' };
 const ARENA_PROMPT = 'A moody, atmospheric battle arena floor for a creature-combat action game: a cracked stone duel platform under dramatic rim lighting, dark teal-to-charcoal palette, faint dust and embers, subtle vignette, painterly but clean. No characters, no UI, no text. Wide 16:9 backdrop, the action happens in the lower-center.';
@@ -170,6 +173,26 @@ async function gen(opts) {
   }
 }
 
+// Kontext has no native alpha; cut the background with fal's hosted matting model.
+async function matteFal(png) {
+  const res = await fetch(`https://fal.run/${FAL_MATTE_MODEL}`, {
+    method: 'POST',
+    headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_url: `data:image/png;base64,${png.toString('base64')}` }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(`fal matte ${res.status}: ${JSON.stringify(json).slice(0, 300)}`);
+  const url = json.image?.url || json.images?.[0]?.url;
+  if (!url) throw new Error(`fal matte: no image in response: ${JSON.stringify(json).slice(0, 300)}`);
+  return Buffer.from(await (await fetch(url)).arrayBuffer());
+}
+// OpenAI already returns transparent; Kontext/fal needs the matting pass. MATTE=0 to skip.
+async function matte(png) {
+  if (process.env.MATTE === '0') return png;
+  if (PROVIDER === 'fal') { try { return await matteFal(png); } catch (e) { console.log(`  (matte skipped: ${e.message})`); return png; } }
+  return png;
+}
+
 function refFor(species) {
   const dex = DEX[species];
   if (!dex) throw new Error(`Unknown species "${species}". Known: ${Object.keys(DEX).join(', ')}`);
@@ -182,7 +205,8 @@ async function genPose(species, pose) {
   const { dex, ref } = refFor(species);
   const out = join(SPRITES, `${dex}${POSE_FILE[pose]}.png`);
   process.stdout.write(`  ${species} ${pose} ... `);
-  const png = await gen({ prompt: POSE_PROMPT[pose], refPath: ref });
+  const raw = await gen({ prompt: POSE_PROMPT[pose], refPath: ref });
+  const png = await matte(raw);
   writeFileSync(out, png);
   console.log(`saved ${out.split('/').pop()} (${(png.length / 1024).toFixed(0)}KB)`);
 }
@@ -208,10 +232,22 @@ try {
   } else if (cmd === 'poses') {
     await genPose(arg, arg2);
   } else if (cmd === 'all') {
-    for (const sp of Object.keys(DEX)) for (const pose of ['idle', 'attack', 'hurt']) await genPose(sp, pose);
+    const fails = [];
+    for (const sp of Object.keys(DEX)) for (const pose of ['idle', 'attack', 'hurt']) {
+      const out = join(SPRITES, `${DEX[sp]}${POSE_FILE[pose]}.png`);
+      if (existsSync(out) && process.env.FORCE !== '1') { console.log(`  ${sp} ${pose} ... exists, skip`); continue; }
+      try { await genPose(sp, pose); } catch (e) { console.log(`  ${sp} ${pose} FAILED: ${e.message}`); fails.push(`${sp}/${pose}`); }
+    }
+    if (fails.length) console.log(`\n${fails.length} failed (re-run individually): ${fails.join(', ')}`);
   } else {
-    // a single species id -> all three poses
-    for (const pose of ['idle', 'attack', 'hurt']) await genPose(cmd, pose);
+    // a single species id -> all three poses, resilient (fal occasionally content-flags; retry once)
+    for (const pose of ['idle', 'attack', 'hurt']) {
+      try { await genPose(cmd, pose); }
+      catch (e) {
+        console.log(`  ${cmd} ${pose} failed (${e.message}); retry...`);
+        try { await genPose(cmd, pose); } catch (e2) { console.log(`  ${cmd} ${pose} FAILED again: ${e2.message}`); }
+      }
+    }
   }
   console.log('Done.');
 } catch (e) {

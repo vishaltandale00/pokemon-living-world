@@ -4,6 +4,7 @@ import { WorldScene } from './game/WorldScene';
 import { ActionBattleScene } from './game/ActionBattleScene';
 import { getConfig, setConfig, testConnection } from './llm/client';
 import { world } from './world/store';
+import { makeMonster } from './world/monsters';
 import { runDeterminismCheck } from './world/determinismCheck';
 import { runKernelCheck } from './world/kernelCheck';
 import { installHarness } from './world/harness';
@@ -92,6 +93,15 @@ function closeJournal() {
 }
 $('journal-close').onclick = closeJournal;
 (window as any).showJournal = showJournal;
+// Dev: launch a battle on demand — `__battle('brock')` (npc) or `__battle('wild','pikachu',12)`.
+(window as any).__battle = (a = 'brock', sp?: string, lvl = 8) => {
+  const ws = game.scene.getScene('world');
+  if (!ws) return 'world scene not ready';
+  ws.scene.pause();
+  if (a === 'wild') ws.scene.launch('actionBattle', { kind: 'wild', wild: makeMonster(sp || 'pikachu', lvl) });
+  else ws.scene.launch('actionBattle', { kind: 'npc', npcId: a });
+  return `launched ${a}`;
+};
 // P0 determinism acceptance check — run `__determinismCheck()` in the console.
 (window as any).__determinismCheck = runDeterminismCheck;
 // P2 kernel contract checks — run `__kernelCheck()` in the console.

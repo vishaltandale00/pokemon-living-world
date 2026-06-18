@@ -105,14 +105,30 @@ const TREES: Record<string, Tree> = {
   },
 
   // ——— Oak: warm professor, guidance + Lugia obsession ———
-  oak(_npc, said) {
+  oak(npc, said) {
     const ch = chapterId();
+    const inLab = npc.map === 'int:viridian_lab';
+    if (!inLab) {
+      return {
+        npcLine: world.state.player.flags['lab_stole_prototype_kit']
+          ? 'Oak scans the grass with a worried frown. "The sighting was thin... and I have the strangest feeling I should return to my lab."'
+          : 'Oak studies the route with field glasses. "If Lugia truly passed over Route 1, even a trace would rewrite our maps."',
+        choices: [choice('Tell me about Lugia', { rep: { research: 1 } }), leave],
+      };
+    }
     if (said === 'What should I do next?') {
       const hint = currentChapter(world.state)?.hint ?? 'Explore the region and find your own path.';
       return { npcLine: `Oak: "${hint} Trust your instincts — this Kanto rewards the curious and the brave."`, choices: [choice('Tell me about Lugia', { rep: { research: 1 } }), leave] };
     }
     if (said === 'Tell me about Lugia')
-      return { npcLine: 'Oak\'s eyes light up. "A silver guardian of the sea, seen over the northern peaks at dawn. Most call it legend. I call it the work of a lifetime — and I could use sharp eyes like yours."', choices: [choice('I\'ll keep watch for it', { rep: { research: 2 }, att: 3 }), leave] };
+      return {
+        npcLine: 'Oak\'s eyes light up. "A silver guardian of the sea, seen over the northern peaks at dawn. If a credible Route 1 sighting came in, I\'d leave this desk in a heartbeat."',
+        choices: [
+          choice('Mention Route 1 sighting', { rep: { rocket: 1, civic: -1 }, att: -2 }),
+          choice('I\'ll keep watch for it', { rep: { research: 2 }, att: 3 }),
+          leave,
+        ],
+      };
     return {
       npcLine: ch === 'boulder_badge'
         ? 'Oak: "Ah, the new trainer! Sketch me a strong bond with that starter of yours. The Boulder Badge in Pewter is the perfect first test."'
@@ -120,7 +136,7 @@ const TREES: Record<string, Tree> = {
       choices: [
         choice('What should I do next?', { att: 1 }),
         choice('Tell me about Lugia', { rep: { research: 1 } }),
-        leave,
+        choice('Mention Route 1 sighting', { rep: { rocket: 1, civic: -1 }, att: -2 }),
       ],
     };
   },

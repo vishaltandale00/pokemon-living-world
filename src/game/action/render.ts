@@ -160,7 +160,10 @@ export class BattleRenderer {
     let lunge = { x: 0, y: 0 };
     if (b.state === 'active' && b.move) { const k = clamp(b.timer / b.move.active, 0, 1); const hd = norm(b.target.x - b.x, b.target.y - b.y); const d = (1 - Math.pow(1 - k, 3)) * 18; lunge = { x: hd.x * d, y: hd.y * d }; }
     else if (b.state === 'tell') { const k = clamp(1 - b.timer / (b.tellTotal || 1), 0, 1); const hd = norm(b.target.x - b.x, b.target.y - b.y); const d = Math.pow(k, 2) * -12; lunge = { x: hd.x * d, y: hd.y * d }; }
-    const scale = 2.3 * (broken ? 0.94 : 1);
+    // normalize by the frame's real height so a 1024px AI pose and a 96px base sprite
+    // both display ~210px tall (otherwise the hi-res frames render ~10x too big)
+    const ih = (img && img.complete && img.width) ? img.height : 96;
+    const scale = (210 / ih) * (broken ? 0.94 : 1);
     const hit = clamp(b.flash / 120, 0, 1);                       // 1 right after taking a hit
     const rec = norm(b.x - eng.p.x, b.y - eng.p.y);               // recoil away from the player
     g.save(); g.translate(b.x + lunge.x + rec.x * hit * 7, b.y + lunge.y + rec.y * hit * 7);
@@ -171,10 +174,12 @@ export class BattleRenderer {
     const breath = 0.035 * Math.sin(time * 0.0026);              // idle breathing
     // volume-ish squash: hit flattens wide, breath rises tall, attack stretches forward
     g.scale(fdir * scale * atk * (1 - breath) * (1 + 0.22 * hit), scale / atk * (1 + breath) * (1 - 0.22 * hit));
+    g.imageSmoothingEnabled = false; // crisp pixel-art sprites (restored by g.restore())
     if (img && img.complete && img.width) {
       const w = img.width, h = img.height;
-      g.drawImage(img, -w / 2, -h + 8); // feet near origin
-      if (b.flash > 0 || b.state === 'active') { g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = b.flash > 0 ? b.flash / 360 : 0.12 + 0.06 * Math.sin(time * 0.04); g.drawImage(img, -w / 2, -h + 8); g.restore(); }
+      const feetY = h > 200 ? -h * 0.78 : -h + 8; // AI frames have ~20% bottom padding; base sprite sits at its bottom
+      g.drawImage(img, -w / 2, feetY); // feet near origin
+      if (b.flash > 0 || b.state === 'active') { g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = b.flash > 0 ? b.flash / 360 : 0.12 + 0.06 * Math.sin(time * 0.04); g.drawImage(img, -w / 2, feetY); g.restore(); }
     } else {
       g.fillStyle = '#7c736a'; g.beginPath(); g.ellipse(0, -20, 26, 30, 0, 0, TAU); g.fill();
     }
@@ -185,6 +190,10 @@ export class BattleRenderer {
 
   private drawPlayer(g: CanvasRenderingContext2D, eng: ActionEngine, img: HTMLImageElement | null) {
     const p = eng.p, time = eng.time; const t = time * 0.001; const sc = 1.8;
+    // sprite scale normalized by frame height (1024px AI pose vs 96px base both ~173px tall);
+    // sc stays fixed for the stage-space effects (ghosts/shadow)
+    const ih = (img && img.complete && img.width) ? img.height : 96;
+    const spr = 173 / ih;
     for (const o of eng.ghosts) { g.save(); g.globalAlpha = clamp(o.life / o.max, 0, 1) * 0.32; g.fillStyle = o.color; g.beginPath(); g.ellipse(o.x, o.y, 11 * sc * 0.6, 13 * sc * 0.6, 0, 0, TAU); g.fill(); g.restore(); }
     g.globalAlpha = 1;
     g.fillStyle = 'rgba(0,0,0,0.4)'; g.beginPath(); g.ellipse(p.x, p.y + 22, 18, 5, 0, 0, TAU); g.fill();
@@ -199,9 +208,11 @@ export class BattleRenderer {
     const breath = (!p.atk && p.dodge <= 0) ? 0.03 * Math.sin(t * 2.2) : 0;  // breathe only when not busy
     g.translate(lean * (p.dir || 1) + rec.x * hurt * 6, bob + rec.y * hurt * 6);
     if (p.inv > 0) g.globalAlpha = 0.55 + 0.25 * Math.sin(time * 0.04);
-    g.scale((p.dir || 1) * sq * (1 - breath) * (1 + 0.2 * hurt) * sc, (1 / sq) * (1 + breath) * (1 - 0.2 * hurt) * sc);
+    g.scale((p.dir || 1) * sq * (1 - breath) * (1 + 0.2 * hurt) * spr, (1 / sq) * (1 + breath) * (1 - 0.2 * hurt) * spr);
+    g.imageSmoothingEnabled = false; // crisp pixel-art sprites (restored by g.restore())
     if (img && img.complete && img.width) {
-      g.drawImage(img, -img.width / 2, -img.height + 6);
+      const feetY = img.height > 200 ? -img.height * 0.78 : -img.height + 6;
+      g.drawImage(img, -img.width / 2, feetY);
     } else {
       g.fillStyle = '#d9701f'; g.beginPath(); g.ellipse(0, -14, 12, 15, 0, 0, TAU); g.fill();
     }

@@ -93,6 +93,7 @@ CHOICES — write 2-3 of the PLAYER'S possible REPLIES, in their own words:
   BAD: "Ask Giovanni" · "I stay cautious" · "Steal data" · "I seek dawn"
 - Every choice must follow from your last line and this moment — no non-sequiturs.
 - Make choices MATTER: at least one each turn carries a real STAKE — provoke you, accept or refuse an offer, demand something, pick a side, cross a line. Don't make every option a harmless question.
+- Never offer a choice that directly loots or steals from the room you're in ("Steal from lab", "Take the Poké Balls") — theft happens through hands-on world interaction, not a line of dialogue. If the player might steal, offer a SETUP instead: distract, deceive, lure away, or ask about security. (For Oak in his lab, a Lugia / Route 1 sighting is a natural distraction.)
 - Keep each label short (a clause or two, under ~60 characters).
 
 EFFECTS per choice:
@@ -111,7 +112,7 @@ Respond as ${npc.name} with your line and the player's choices.`;
     // real-time conversation runs on the FAST tier (falls back to the smart model if unset)
     const turn = await chatJSON<DialogueTurn>(system, user, 'dialogue_turn', DIALOGUE_SCHEMA as unknown as Record<string, unknown>, 900, 'fast');
     // sanitize + keep lengths bounded so the dialogue box stays readable
-    turn.choices = (turn.choices ?? []).slice(0, 3).map(c => ({
+    turn.choices = (turn.choices ?? []).slice(0, 3).map(c => sanitizeChoice(npc, {
       label: clip(String(c.label), 64),
       repEffects: {
         league: clampInt(c.repEffects?.league), rocket: clampInt(c.repEffects?.rocket),
@@ -143,4 +144,19 @@ function clip(s: string, max: number): string {
 function clampInt(v: unknown): number {
   const n = Math.trunc(Number(v) || 0);
   return Math.max(-5, Math.min(5, n));
+}
+
+function sanitizeChoice(npc: NPC, c: DialogueTurn['choices'][number]): DialogueTurn['choices'][number] {
+  const theft = /\b(steal|rob|loot|pocket|take)\b/i.test(c.label);
+  const labTarget = /\b(lab|oak|starter|pok[eé] ?ball|supply|research|cabinet|case|machine)\b/i.test(c.label);
+  if (npc.id === 'oak' && npc.map === 'int:viridian_lab' && theft && labTarget) {
+    return {
+      label: 'Mention Route 1 sighting',
+      repEffects: { league: 0, rocket: 1, civic: -1, research: 0 },
+      attitudeDelta: -2,
+      startsBattle: false,
+      acceptsOffer: null,
+    };
+  }
+  return c;
 }

@@ -1,6 +1,7 @@
 import type { WorldState, WorldEvent, Development, RoleSlot, Reputation, Building } from './types';
 import { createSeedWorld } from './seed';
 import { nextUnit } from './rng';
+import { buildEntitiesFromWorld } from './entity';
 
 // The simulation core. Owns the world state, validates ALL mutations
 // (including LLM director proposals), persists to localStorage.
@@ -39,6 +40,8 @@ export class WorldStore {
       // determinism anchors for saves that predate P0
       if (!state.rng) state.rng = { seed: 1, cursors: {} };
       if (!state.idSeq) state.idSeq = {};
+      // kernel Entity substrate for saves that predate P1 (derive from structs)
+      if (!state.entities) state.entities = buildEntitiesFromWorld(state);
       // migrate NPCs to interiors: add any new NPCs (nurses/clerk) the save is
       // missing, and relocate the structural cast to their canonical spots so
       // gym leaders / Oak / Sal actually live inside their buildings

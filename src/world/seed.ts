@@ -1,5 +1,6 @@
 import type { WorldState, NPC, RoleSlot, Building, TownState } from './types';
 import { makeMonster } from './monsters';
+import { buildEntitiesFromWorld } from './entity';
 
 // Seed world: Viridian City + Route 1 + Pewter City (real Kanto).
 // Everything here is DATA — the world mutates from day one via the director
@@ -95,7 +96,7 @@ export function createSeedWorld(seed = 1): WorldState {
     rocket_warehouse:{ id: 'rocket_warehouse', kind: 'hideout', name: 'Old Warehouse',  map: 'pewter',   x: 3,  y: 15, w: 4, h: 3, owner: 'rocket',    condition: 'damaged', builtOnDay: 0 },
   };
 
-  return {
+  const state: WorldState = {
     day: 1,
     player: {
       name: 'You', x: 10, y: 16, map: 'viridian',
@@ -119,5 +120,9 @@ export function createSeedWorld(seed = 1): WorldState {
       'Nobody has ever seen Giovanni and the Rocket boss in the same room. Funny, that.',
     ],
     pendingOffers: [],
+    entities: {},
   };
+  // P1a: derive the kernel Entity substrate from the seed structs.
+  state.entities = buildEntitiesFromWorld(state);
+  return state;
 }

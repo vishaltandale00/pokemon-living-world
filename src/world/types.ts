@@ -4,6 +4,7 @@
 
 import type { DialogueTurn } from './dialogueContent';
 import type { RngState } from './rng';
+import type { EntityRegistry } from './entity';
 
 export type FactionId = 'league' | 'rocket' | 'townsfolk' | 'rangers';
 
@@ -149,6 +150,8 @@ export interface WorldState {
   // ——— determinism (P0): the world-sim's reproducibility anchors ———
   rng: RngState;                 // seed + per-stream cursors (see world/rng.ts)
   idSeq: Record<string, number>; // per-prefix monotonic id counters (replaces Date.now ids)
+  // ——— kernel substrate (P1): every game object as an open Entity ———
+  entities: EntityRegistry;      // derived from structs in P1a; tick-owned from P2 (see world/entity.ts)
 }
 
 export interface RoleOffer {

@@ -6,8 +6,10 @@ import { ActionEngine, STAGE_W, STAGE_H } from './action/engine';
 import { BattleRenderer, type BattleAssets } from './action/render';
 import { toActionKit, toBossKit } from './action/kit';
 import { applyBattleOutcome, awardXp, catchChance, type BattleOutcome, type OutcomeCtx } from '../world/battleOutcome';
+import { GamepadPoller } from './gamepad';
 
 interface BattleData { kind: 'npc' | 'wild'; npcId?: string; wild?: MonsterInstance }
+const POTION_HEAL = 35;
 
 // Real-time action battle. Fully replaces the menu BattleScene: same init payload
 // and the same pause→launch→resume('world', {battleResult}) handshake, so world
@@ -33,11 +35,13 @@ export class ActionBattleScene extends Phaser.Scene {
   private dpr = 1;
   private sprites = new Map<number, HTMLImageElement>();
 
+  private pad = new GamepadPoller();
   private held = new Set<string>();
   private onKeyDown!: (e: KeyboardEvent) => void;
   private onKeyUp!: (e: KeyboardEvent) => void;
   private onResize!: () => void;
   private ended = false;
+  private cleaned = false;
   private levelMsgs: string[] = [];
 
   constructor() { super('actionBattle'); }
@@ -63,7 +67,19 @@ export class ActionBattleScene extends Phaser.Scene {
   }
 
   create() {
-    this.dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+    this.cleaned = false;
+    // bail cleanly if there's nothing to fight (e.g. an NPC with an empty party,
+    // or no healthy player mon) — never throw inside create() with the world paused
+    if (!this.enemyParty.length || !this.playerParty.length || this.playerParty.every(m => m.hp <= 0)) {
+      this.ended = true;
+      this.time.delayedCall(0, () => { this.scene.stop(); this.scene.resume('world', { battleResult: '' }); });
+      return;
+    }
+    // register teardown FIRST so a later throw can never orphan the overlay / leak listeners
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
+    // cap the action overlay at 1.5× device pixels: the full-window blit + per-frame
+    // bloom blur is fill-bound, and 1.5× a 960×540 stage is still crisp on retina.
+    this.dpr = Math.max(1, Math.min(1.5, window.devicePixelRatio || 1));
 
     // native render target
     this.stage = document.createElement('canvas');
@@ -86,7 +102,8 @@ export class ActionBattleScene extends Phaser.Scene {
     const lead = this.playerParty[this.playerIdx];
     const opp = this.enemyParty[0];
     const intro = this.npc ? `${this.npc.name} challenges you!` : `A wild ${SPECIES[opp.speciesId].name} appears!`;
-    this.engine = new ActionEngine(toActionKit(lead), toBossKit(opp, { role: this.role, wild: this.isWild }), intro);
+    this.engine = new ActionEngine(toActionKit(lead), toBossKit(opp, { role: this.role, wild: this.isWild, playerLevel: lead.level, bossId: this.npc?.id }), intro);
+    this.engine.isWildBattle = this.isWild;
     this.engine.p.hp = this.engine.p.hpShown = Math.max(1, Math.min(lead.hp, this.engine.p.maxHp));
 
     this.preloadSprite(SPECIES[lead.speciesId].dexId);
@@ -96,7 +113,7 @@ export class ActionBattleScene extends Phaser.Scene {
     // and never leak into the paused WorldScene. Phaser's own keyboard is disabled
     // for the duration so it can't double-handle.
     this.game.input.keyboard!.enabled = false;
-    const HANDLED = new Set(['w', 'a', 's', 'd', 'j', 'k', 'l', 'u', 'i', 'o', 'c', 'f', ' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'escape']);
+    const HANDLED = new Set(['w', 'a', 's', 'd', 'j', 'k', 'l', 'u', 'i', 'o', 'h', 'c', 'f', ' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'escape']);
     this.onKeyDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       if (!HANDLED.has(k)) return;
@@ -110,8 +127,12 @@ export class ActionBattleScene extends Phaser.Scene {
         case 'u': this.engine.onPress('U'); break;
         case 'i': this.engine.onPress('I'); break;
         case 'o': this.engine.onPress('O'); break;
+        case 'h': this.tryHeal(); break;
         case 'c': if (this.isWild) this.engine.onPress('catch'); break;
-        case 'f': case 'escape': if (this.isWild) this.engine.onPress('flee'); break;
+        case 'f': case 'escape':
+          if (this.isWild) this.engine.onPress('flee');
+          else this.engine.setLog("Can't run from a trainer battle!");
+          break;
       }
     };
     this.onKeyUp = (e: KeyboardEvent) => {
@@ -120,8 +141,6 @@ export class ActionBattleScene extends Phaser.Scene {
     };
     window.addEventListener('keydown', this.onKeyDown, true);
     window.addEventListener('keyup', this.onKeyUp, true);
-
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
   }
 
   private fitView() {
@@ -146,15 +165,32 @@ export class ActionBattleScene extends Phaser.Scene {
   update(time: number) {
     if (this.ended || !this.engine) return;
 
-    // movement vector from held keys
+    // movement vector from held keys, or the left stick / d-pad if a pad is connected
     const L = this.held.has('a') || this.held.has('arrowleft');
     const R = this.held.has('d') || this.held.has('arrowright');
     const U = this.held.has('w') || this.held.has('arrowup');
     const D = this.held.has('s') || this.held.has('arrowdown');
-    this.engine.setMove((R ? 1 : 0) - (L ? 1 : 0), (D ? 1 : 0) - (U ? 1 : 0));
+    let mx = (R ? 1 : 0) - (L ? 1 : 0), my = (D ? 1 : 0) - (U ? 1 : 0);
+    const pad = this.pad.poll();
+    if (pad.connected && (pad.mx || pad.my)) { mx = pad.mx; my = pad.my; }
+    this.engine.setMove(mx, my);
+    // pad action edges: A light · X heavy · B dodge · Y/LB/RB specials · RT heal · LT catch · Back flee
+    if (pad.connected) {
+      if (pad.A) this.engine.onPress('light');
+      if (pad.X) this.engine.onPress('heavy');
+      if (pad.B) this.engine.onPress('dodge');
+      if (pad.Y) this.engine.onPress('I');
+      if (pad.LB) this.engine.onPress('U');
+      if (pad.RB) this.engine.onPress('O');
+      if (pad.RT) this.tryHeal();
+      if (pad.LT && this.isWild) this.engine.onPress('catch');
+      if (pad.back && this.isWild) this.engine.onPress('flee');
+    }
+    this.engine.potions = world.state.player.items.potion ?? 0;
 
     this.engine.step(time);
     this.handleRequests();
+    if (this.ended) return;   // a catch/flee request may have ended the battle
     this.handlePhase();
     if (this.ended) return;
 
@@ -185,6 +221,14 @@ export class ActionBattleScene extends Phaser.Scene {
       this.engine.fleeRequested = false;
       this.tryFlee();
     }
+  }
+
+  private tryHeal() {
+    const items = world.state.player.items;
+    if (!items.potion) { this.engine.setLog('No Potions left! Buy more at the Mart.'); return; }
+    if (!this.engine.startHeal(POTION_HEAL)) return;   // busy / full HP → don't spend the item
+    items.potion -= 1;
+    world.save();
   }
 
   private tryCatch() {
@@ -223,12 +267,12 @@ export class ActionBattleScene extends Phaser.Scene {
       // sync surviving player hp, award XP for the kill
       this.playerParty[this.playerIdx].hp = Math.max(1, Math.round(eng.p.hp));
       const lvl = awardXp(this.playerParty[this.playerIdx], defeated, !!this.npc);
-      if (lvl) this.levelMsgs.push(lvl);
+      if (lvl) { this.levelMsgs.push(lvl); eng.pulseText(eng.p.x, eng.p.y - 64, 'LEVEL UP!', '120,230,150', 22); }
       if (this.enemyIdx < this.enemyParty.length - 1) {
         this.enemyIdx++;
         const next = this.enemyParty[this.enemyIdx];
         this.preloadSprite(SPECIES[next.speciesId].dexId);
-        eng.swapBoss(toBossKit(next, { role: this.role, wild: this.isWild }), `${this.npc?.name ?? 'Foe'} sends out ${SPECIES[next.speciesId].name}!`);
+        eng.swapBoss(toBossKit(next, { role: this.role, wild: this.isWild, playerLevel: this.playerParty[this.playerIdx].level, bossId: this.npc?.id }), `${this.npc?.name ?? 'Foe'} sends out ${SPECIES[next.speciesId].name}!`);
       } else {
         this.finish(this.npc ? 'npc_win' : 'wild_win', { npcId: this.npc?.id, wildSpeciesId: defeated.speciesId });
       }
@@ -258,11 +302,15 @@ export class ActionBattleScene extends Phaser.Scene {
   }
 
   private cleanup() {
+    if (this.cleaned) return;
+    this.cleaned = true;
     if (this.onKeyDown) window.removeEventListener('keydown', this.onKeyDown, true);
     if (this.onKeyUp) window.removeEventListener('keyup', this.onKeyUp, true);
     if (this.onResize) window.removeEventListener('resize', this.onResize);
     this.view?.remove();
     this.held.clear();
     if (this.game?.input?.keyboard) this.game.input.keyboard.enabled = true;
+    // clear any keys the world might think are still held (it was paused while we ran)
+    (this.scene.get('world') as Phaser.Scene | null)?.input?.keyboard?.resetKeys();
   }
 }

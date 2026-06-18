@@ -175,6 +175,7 @@ export class BattleRenderer {
     }
     g.restore(); g.globalAlpha = 1;
     if (p.inv > 0) { g.save(); g.globalCompositeOperation = 'lighter'; g.strokeStyle = `rgba(110,210,255,${0.4 + 0.3 * Math.sin(time * 0.03)})`; g.lineWidth = 2; g.beginPath(); g.arc(p.x, p.y, 26, 0, TAU); g.stroke(); g.restore(); }
+    if (p.heal) { g.save(); g.globalCompositeOperation = 'lighter'; const k = 1 - p.heal.t / p.heal.dur; g.globalAlpha = 0.5; g.drawImage(this.GLOW_GRASS, p.x - 30, p.y - 44, 60, 60); g.globalAlpha = 1; g.strokeStyle = 'rgba(150,230,150,.55)'; g.lineWidth = 2.4; g.beginPath(); g.arc(p.x, p.y, 12 + k * 24, 0, TAU); g.stroke(); g.restore(); }
     if (p.just > 0) { g.save(); g.globalCompositeOperation = 'lighter'; const k = p.just / 700; g.strokeStyle = `rgba(120,210,255,${0.35 * k})`; g.lineWidth = 2; for (let i = 0; i < 4; i++) { const oy = -14 + i * 9; g.beginPath(); g.moveTo(p.x - (p.dir || 1) * 16, p.y + oy); g.lineTo(p.x - (p.dir || 1) * (34 + i * 4), p.y + oy); g.stroke(); } g.restore(); }
     this.drawSlash(g, eng);
     if (p.combo >= 2) {
@@ -250,7 +251,7 @@ export class BattleRenderer {
     if (p.hp < p.maxHp * 0.3 && !p.dead) { const lp = 0.1 + 0.1 * Math.sin(time * 0.012); g.save(); g.globalAlpha = lp; g.fillStyle = this.lowVignette; g.fillRect(0, 0, W, H); g.restore(); }
     if (p.dead) { g.fillStyle = `rgba(20,0,0,${0.55 * (1 - p.dead / 1600) + 0.2})`; g.fillRect(0, 0, W, H); g.textAlign = 'center'; g.fillStyle = '#ff6b5b'; g.font = 'bold 40px ui-monospace, monospace'; g.fillText(p.kit.name.toUpperCase() + ' FAINTED', W / 2, H / 2 - 6); g.textAlign = 'left'; }
     if (eng.winT > 0 && !p.dead) { const a = clamp(eng.winT / 1700, 0, 1); g.fillStyle = `rgba(8,12,8,${0.28 * a})`; g.fillRect(0, 0, W, H); g.textAlign = 'center'; g.fillStyle = '#eccb73'; g.font = 'bold 44px ui-monospace, monospace'; g.fillText('DOWN!', W / 2, H / 2 - 6); g.textAlign = 'left'; }
-    if (eng.introT > 0) { const a = clamp(eng.introT / 600, 0, 1); g.save(); g.globalAlpha = Math.min(1, a); g.textAlign = 'center'; g.fillStyle = 'rgba(8,12,16,.6)'; g.fillRect(0, H * 0.30, W, 60); g.fillStyle = '#eccb73'; g.font = 'bold 26px ui-monospace, monospace'; g.fillText(p.kit.name.toUpperCase() + '   vs   ' + b.name.toUpperCase(), W / 2, H * 0.30 + 38); g.restore(); g.textAlign = 'left'; }
+    if (eng.introT > 0) { const a = clamp(eng.introT / 600, 0, 1); g.save(); g.globalAlpha = Math.min(1, a); g.textAlign = 'center'; g.fillStyle = 'rgba(8,12,16,.62)'; g.fillRect(0, H * 0.28, W, 78); g.fillStyle = '#eccb73'; g.font = 'bold 26px ui-monospace, monospace'; g.fillText(p.kit.name.toUpperCase() + '   vs   ' + b.name.toUpperCase(), W / 2, H * 0.28 + 36); g.fillStyle = '#9fb6c2'; g.font = '13px ui-monospace, monospace'; g.fillText(`${b.roleLabel} · Lv${b.level} · ${b.type1}${b.type2 ? '/' + b.type2 : ''}`, W / 2, H * 0.28 + 60); g.restore(); g.textAlign = 'left'; }
   }
 
   private bar(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, val: number, max: number, col: string, opt: { trail?: number; tcol?: string } = {}) {
@@ -271,6 +272,10 @@ export class BattleRenderer {
     this.bar(g, 24, 58, 176, 7, p.stamina, p.maxStamina, p.stamina < 24 ? '#ef5148' : '#e9c45f');
     let sx = 24; const sy = 72;
     for (const s of p.kit.specials) { this.drawSlot(g, sx, sy, eng, s.slot, s.name); sx += 92; }
+    // potion / heal indicator
+    g.font = '10px ui-monospace, monospace'; g.textAlign = 'left';
+    g.fillStyle = eng.potions > 0 ? '#8fe0a0' : '#5d7180';
+    g.fillText(`H  Potion ×${eng.potions}`, sx + 2, sy + 12);
     // boss (top-center)
     const bw = 420, bx = W / 2 - bw / 2, by = 30; g.textAlign = 'center'; g.font = 'bold 15px ui-monospace, monospace'; g.fillStyle = '#e7eef3'; g.fillText(b.name.toUpperCase(), W / 2, by - 8);
     for (let i = 0; i < 3; i++) { const px = bx + bw - 8 - i * 15, py = by - 13; g.save(); g.translate(px, py); g.rotate(Math.PI / 4); g.fillStyle = i < b.phase ? (b.phase >= 3 ? '#ef5148' : b.phase >= 2 ? '#eccb73' : '#9fb6c2') : 'rgba(120,150,170,.25)'; g.fillRect(-4, -4, 8, 8); g.restore(); }
@@ -280,7 +285,8 @@ export class BattleRenderer {
     // log + controls
     this.rr(g, 24, H - 30, W - 48, 22, 6); g.fillStyle = 'rgba(7,11,15,.82)'; g.fill(); g.strokeStyle = 'rgba(120,160,180,.3)'; g.lineWidth = 1; g.stroke();
     g.textAlign = 'left'; g.fillStyle = '#dfeaf0'; g.font = '12px ui-monospace, monospace'; g.fillText(eng.log, 36, H - 15);
-    g.textAlign = 'right'; g.fillStyle = '#7f97a6'; g.font = '10px ui-monospace, monospace'; g.fillText('WASD move · J light · K heavy · L dodge · I/U special', W - 36, H - 15); g.textAlign = 'left';
+    const ctl = 'WASD move · J light · K heavy · L dodge · I/U special · H heal' + (eng.isWildBattle ? ' · C catch · F flee' : '');
+    g.textAlign = 'right'; g.fillStyle = '#7f97a6'; g.font = '10px ui-monospace, monospace'; g.fillText(ctl, W - 36, H - 15); g.textAlign = 'left';
   }
   private drawSlot(g: CanvasRenderingContext2D, x: number, y: number, eng: ActionEngine, slot: string, name: string) {
     const cd = eng.p.cd[slot] || 0, cdmax = eng.p.cdMax[slot] || 3000; const ready = cd <= 0;

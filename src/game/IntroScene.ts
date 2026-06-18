@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { world } from '../world/store';
 import { makeMonster, SPECIES } from '../world/monsters';
 import { MAP_W, MAP_H, TILE } from './maps';
+import { GamepadPoller } from './gamepad';
 
 // Intro: Oak welcomes you, explains how this world works (it's NOT a normal
 // Pokémon game), teaches the controls, and you pick your starter.
@@ -27,6 +28,11 @@ export class IntroScene extends Phaser.Scene {
   private bodyText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private starterSprites: Phaser.GameObjects.Image[] = [];
+  private starterImgs: Phaser.GameObjects.Image[] = [];
+  private starterLabels: Phaser.GameObjects.Text[] = [];
+  private starterSel = 1;   // default highlight: Charmander
+  private pad = new GamepadPoller();
+  private done = false;
 
   constructor() { super('intro'); }
 
@@ -59,6 +65,8 @@ export class IntroScene extends Phaser.Scene {
     this.bodyText.setText(p.text);
     this.starterSprites.forEach(s => s.destroy());
     this.starterSprites = [];
+    this.starterImgs = [];
+    this.starterLabels = [];
     if (p.starterPick) {
       const W = MAP_W * TILE;
       STARTERS.forEach((s, i) => {
@@ -69,11 +77,35 @@ export class IntroScene extends Phaser.Scene {
           fontFamily: 'monospace', fontSize: '10px', color: '#9fd4ff', align: 'center',
         }).setOrigin(0.5, 0);
         this.starterSprites.push(img, label as unknown as Phaser.GameObjects.Image);
+        this.starterImgs.push(img);
+        this.starterLabels.push(label);
       });
-      this.hintText.setText('press 1, 2 or 3 to choose your partner');
+      this.highlightStarter();
+      this.hintText.setText('1/2/3 — or ◀ ▶ then (A) — to choose your partner');
     } else {
-      this.hintText.setText('[SPACE] continue    ·    [ENTER] skip to starter');
+      this.hintText.setText('[SPACE] / (A) continue    ·    [ENTER] skip to starter');
     }
+  }
+
+  private highlightStarter() {
+    this.starterLabels.forEach((t, i) => t.setColor(i === this.starterSel ? '#ffe9a0' : '#9fd4ff'));
+    this.starterImgs.forEach((im, i) => im.setScale(i === this.starterSel ? 1.32 : 1.1));
+  }
+
+  // controller support (keyboard still flows through onKey)
+  update() {
+    if (this.done) return;
+    const gp = this.pad.poll();
+    if (!gp.connected) return;
+    if (PAGES[this.page].starterPick) {
+      if (gp.left) { this.starterSel = (this.starterSel + STARTERS.length - 1) % STARTERS.length; this.highlightStarter(); }
+      if (gp.right) { this.starterSel = (this.starterSel + 1) % STARTERS.length; this.highlightStarter(); }
+      if (gp.A) this.chooseStarter(STARTERS[this.starterSel]);
+      return;
+    }
+    if (gp.start) { this.page = PAGES.length - 1; this.render(); return; }  // skip to starter
+    if (gp.A || gp.right) { this.page = Math.min(PAGES.length - 1, this.page + 1); this.render(); }
+    else if (gp.B || gp.left) { if (this.page > 0) { this.page--; this.render(); } }
   }
 
   private onKey(key: string) {
@@ -103,6 +135,8 @@ export class IntroScene extends Phaser.Scene {
   }
 
   private chooseStarter(speciesId: string) {
+    if (this.done) return;
+    this.done = true;
     const spec = SPECIES[speciesId];
     world.state.player.party = [makeMonster(speciesId, 8)];
     world.state.player.flags.introDone = true;

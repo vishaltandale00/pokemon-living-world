@@ -27,6 +27,18 @@ interface BossMoveDef {
   reach?: number; len?: number; hw?: number; hh?: number; radius?: number; inner?: number; outer?: number;
 }
 
+// Per-boss authored pattern tables: which moves appear per phase, and a tell-speed
+// multiplier. Brock is slow + deliberate (tutorial gym), Giovanni fast + combo-heavy;
+// fast/tank/generic are stat-derived fallbacks so non-marquee fights still vary.
+interface BossPattern { pools: [string[], string[], string[]]; tellMult: number; }
+const BOSS_PATTERNS: Record<string, BossPattern> = {
+  generic: { pools: [['sweep', 'spear', 'slam'], ['sweep', 'spear', 'slam', 'ring'], ['sweep', 'spear', 'slam', 'ring', 'combo']], tellMult: 1.0 },
+  brock: { pools: [['slam', 'sweep'], ['slam', 'sweep', 'spear'], ['slam', 'sweep', 'spear', 'ring']], tellMult: 1.12 },
+  giovanni: { pools: [['sweep', 'combo'], ['sweep', 'combo', 'spear', 'slam'], ['combo', 'spear', 'slam', 'ring', 'sweep']], tellMult: 0.85 },
+  fast: { pools: [['sweep', 'combo'], ['sweep', 'combo', 'ring'], ['sweep', 'combo', 'ring', 'spear']], tellMult: 0.82 },
+  tank: { pools: [['slam', 'spear'], ['slam', 'spear', 'ring'], ['slam', 'spear', 'ring', 'combo']], tellMult: 1.08 },
+};
+
 const BOSS_MOVES: Record<string, BossMoveDef> = {
   sweep: { kind: 'sweep', name: 'Tail Sweep', tell: 700, active: 175, recover: 700, mult: 1.0, reach: 150 },
   spear: { kind: 'spear', name: 'Spear Line', tell: 800, active: 210, recover: 560, mult: 1.35, len: 760, hw: 46 },
@@ -43,6 +55,7 @@ export interface PlayerState {
   faceX: number; faceY: number; dir: number; moving: boolean;
   dodge: number; inv: number; vx: number; vy: number;
   atk: PlayerAttack | null;
+  heal: { t: number; dur: number; amount: number } | null;
   cd: Record<string, number>; cdMax: Record<string, number>;
   refunded: Record<string, boolean>; regenLock: number;
   combo: number; comboT: number; chain: number; dead: number; just: number;
@@ -58,7 +71,7 @@ export interface BossState {
   kit: BossKit;
   x: number; y: number; r: number;
   hp: number; maxHp: number; hpShown: number;
-  type1: string; type2: string | null; name: string; element: string;
+  type1: string; type2: string | null; name: string; element: string; level: number; roleLabel: string; pattern: string;
   face: number; posture: number; maxPosture: number; lastHit: number;
   state: 'idle' | 'tell' | 'active' | 'recover' | 'broken';
   timer: number; tellTotal: number; move: BossMoveDef | null;
@@ -76,7 +89,7 @@ function freshPlayer(kit: ActionKit): PlayerState {
     kit, x: 300, y: 372, r: 14, hp: kit.hp, maxHp: kit.hp, hpShown: kit.hp,
     stamina: 100, maxStamina: 100, focus: 0, maxFocus: 100,
     faceX: 1, faceY: 0, dir: 1, moving: false,
-    dodge: 0, inv: 0, vx: 0, vy: 0, atk: null,
+    dodge: 0, inv: 0, vx: 0, vy: 0, atk: null, heal: null,
     cd: { U: 0, I: 0, O: 0 }, cdMax: {}, refunded: { U: false, I: false, O: false }, regenLock: 0,
     combo: 0, comboT: 0, chain: 0, dead: 0, just: 0,
   };
@@ -84,7 +97,7 @@ function freshPlayer(kit: ActionKit): PlayerState {
 function freshBoss(kit: BossKit): BossState {
   return {
     kit, x: 650, y: 300, r: kit.radius, hp: kit.hpPool, maxHp: kit.hpPool, hpShown: kit.hpPool,
-    type1: kit.type1, type2: kit.type2, name: kit.name, element: kit.element,
+    type1: kit.type1, type2: kit.type2, name: kit.name, element: kit.element, level: kit.level, roleLabel: kit.roleLabel, pattern: kit.pattern,
     face: -1, posture: 0, maxPosture: kit.maxPosture, lastHit: 999,
     state: 'idle', timer: 1100, tellTotal: 1, move: null, target: { x: 0, y: 0 }, hit: false,
     phase: 1, broken: 0, flash: 0, atkBase: kit.atkBase,
@@ -100,12 +113,14 @@ export class ActionEngine {
 
   // juice / camera globals
   time = 0; private prev = 0; started = false;
-  hitstop = 0; shake = 0; slow = 1; flash = 0; zoom = 1; introT = 1400;
+  hitstop = 0; shake = 0; slow = 1; flash = 0; zoom = 1; introT = 2400;
   camX = STAGE_W / 2; camY = STAGE_H / 2; kickX = 0; kickY = 0;
   impact = 0; impactX = 0; impactY = 0;
   groundFlash = 0; groundFlashX = 0; groundFlashY = 0;
   winT = 0; comboPop = 0;
   log = '';
+  isWildBattle = false;   // set by the scene; drives the catch/flee HUD hint
+  potions = 0;            // set by the scene each frame; drives the heal HUD count
 
   fx: Particle[] = []; texts: FloatText[] = []; ghosts: Ghost[] = [];
   decals: Particle[] = []; shots: Shot[] = []; dust: Particle[] = [];
@@ -170,7 +185,18 @@ export class ActionEngine {
   // ——— combat ———
   private input() { return this.mv; }
   private aim() { const v = this.mv; if (v.x || v.y) return v; return norm(this.b.x - this.p.x, this.b.y - this.p.y); }
-  private busy() { const p = this.p; return !!(p.dead || this.winT > 0 || p.atk); }
+  private busy() { const p = this.p; return !!(p.dead || this.winT > 0 || p.atk || p.heal); }
+
+  // Begin a Potion channel. Returns false (so the scene doesn't spend the item) if
+  // the player can't heal right now or is already at full HP. Vulnerable: a hit cancels it.
+  startHeal(amount: number): boolean {
+    const p = this.p;
+    if (this.phase !== 'fighting' || this.busy() || p.dodge > 0) return false;
+    if (p.hp >= p.maxHp) { this.pulseText(p.x, p.y - 36, 'full HP', '150,200,160', 12); return false; }
+    p.heal = { t: 700, dur: 700, amount };
+    this.log = 'Drinking a Potion — hold steady!';
+    return true;
+  }
 
   private bodyHit(x: number, y: number, fx: number, fy: number, reach: number, cosArc: number) {
     const b = this.b; const dx = b.x - x, dy = b.y - y, l = hyp(dx, dy); const dd = l - b.r;
@@ -309,13 +335,13 @@ export class ActionEngine {
     if ((b.state === 'idle' || b.state === 'recover') && b.lastHit > 700) b.posture = Math.max(0, b.posture - dt * 0.045);
     b.timer -= dt;
     if (b.state === 'idle' && b.timer <= 0) {
-      const close = hyp(p.x - b.x, p.y - b.y) < 175;
-      const pool = close ? ['sweep', 'combo', 'slam'] : ['spear', 'slam', 'sweep'];
-      if (b.phase >= 2) pool.push('ring');
-      if (b.phase >= 3) pool.push('combo', 'spear');
-      b.move = BOSS_MOVES[pool[Math.floor(Math.random() * pool.length)]];
+      const pat = BOSS_PATTERNS[b.pattern] ?? BOSS_PATTERNS.generic;
+      const pool = pat.pools[Math.min(2, b.phase - 1)];
+      const far = hyp(p.x - b.x, p.y - b.y) > 240;
+      if (far && pool.includes('spear') && Math.random() < 0.55) b.move = BOSS_MOVES.spear; // close the gap
+      else b.move = BOSS_MOVES[pool[Math.floor(Math.random() * pool.length)]];
       b.target = { x: p.x, y: p.y }; b.state = 'tell';
-      b.timer = b.move.tell * (b.phase === 3 ? 0.78 : b.phase === 2 ? 0.88 : 1); b.tellTotal = b.timer; b.hit = false;
+      b.timer = b.move.tell * pat.tellMult * (b.phase === 3 ? 0.85 : b.phase === 2 ? 0.92 : 1); b.tellTotal = b.timer; b.hit = false;
       this.log = 'Tell: ' + b.move.name + '.';
     } else if (b.state === 'tell' && b.timer <= 0) {
       b.state = 'active'; b.timer = b.move!.active; this.shake = 8;
@@ -356,6 +382,11 @@ export class ActionEngine {
 
   private hurt(n: number) {
     const p = this.p, b = this.b;
+    if (p.heal) { p.heal = null; this.pulseText(p.x, p.y - 40, 'interrupted!', '220,180,120', 13); }  // a hit cancels the channel
+    // single-hit cap so an over-leveled boss can't one-shot a frail mon, plus a
+    // last-stand: a clean burst from healthy leaves you at 1 instead of dead.
+    n = Math.min(n, Math.ceil(p.maxHp * 0.55));
+    if (p.hp - n <= 0 && p.hp > p.maxHp * 0.35) n = p.hp - 1;
     p.hp = clamp(p.hp - n, 0, p.maxHp); p.combo = 0; p.comboT = 0; p.chain = 0;
     this.shake = 13; this.hitstop = 95; this.flash = 110; this.zoom = 1.06;
     const k = norm(p.x - b.x, p.y - b.y); this.kickX = k.x * 11; this.kickY = k.y * 11;
@@ -373,6 +404,16 @@ export class ActionEngine {
     for (const k of ['U', 'I', 'O']) p.cd[k] = Math.max(0, p.cd[k] - dt);
     if (p.regenLock > 0) p.regenLock -= dt;
     this.dodgeBuf = Math.max(0, this.dodgeBuf - dt); this.atkBuf = Math.max(0, this.atkBuf - dt);
+
+    // Potion channel: locked + vulnerable while drinking (a hit cancels it in hurt())
+    if (p.heal) {
+      p.heal.t -= dt;
+      p.hp = clamp(p.hp + p.heal.amount * dt / p.heal.dur, 0, p.maxHp);
+      if (Math.random() < 0.4 && this.fx.length < 260) this.fx.push({ type: 'ember', x: p.x + rnd(-12, 12), y: p.y + rnd(-4, 10), vx: rnd(-8, 8), vy: rnd(-50, -20), life: rnd(400, 800), max: 800, col: '160,230,150', w: 2 });
+      if (p.heal.t <= 0) { this.pulseText(p.x, p.y - 40, '+' + Math.round(p.heal.amount), '120,230,150', 18); p.heal = null; }
+      this.clampPos();
+      return;
+    }
 
     if (!p.atk && p.dodge <= 0 && p.regenLock <= 0) p.stamina = clamp(p.stamina + dt * p.kit.regen, 0, p.maxStamina);
     if (this.dodgeBuf > 0 && this.tryDodge()) this.dodgeBuf = 0;

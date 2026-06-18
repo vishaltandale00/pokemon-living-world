@@ -17,7 +17,8 @@ Global verify (must stay green the whole time):
 - `npx vite build` → succeeds
 - headless sim `/tmp/abtest/driver.cjs` → all matchups terminate, passive player still dies, no NaN/∞
 
-Browser QA harness: `npm run dev` (port 5199), drive WorldScene via `window.dispatchEvent`
+Browser QA harness: `npm run dev` (Vite default port 5173 unless overridden — read the
+dev-server startup line for the actual URL), drive WorldScene via `window.dispatchEvent`
 (see browse-skill memory), inspect `world.state` + console + network via claude-in-chrome.
 If the browser extension is unavailable, mark the gate `- [ ] (BLOCKED: needs live browser)` and continue with auto gates.
 

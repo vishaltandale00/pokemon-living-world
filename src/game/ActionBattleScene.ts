@@ -75,7 +75,9 @@ export class ActionBattleScene extends Phaser.Scene {
     }
     // register teardown FIRST so a later throw can never orphan the overlay / leak listeners
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
-    this.dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+    // cap the action overlay at 1.5× device pixels: the full-window blit + per-frame
+    // bloom blur is fill-bound, and 1.5× a 960×540 stage is still crisp on retina.
+    this.dpr = Math.max(1, Math.min(1.5, window.devicePixelRatio || 1));
 
     // native render target
     this.stage = document.createElement('canvas');
@@ -98,7 +100,7 @@ export class ActionBattleScene extends Phaser.Scene {
     const lead = this.playerParty[this.playerIdx];
     const opp = this.enemyParty[0];
     const intro = this.npc ? `${this.npc.name} challenges you!` : `A wild ${SPECIES[opp.speciesId].name} appears!`;
-    this.engine = new ActionEngine(toActionKit(lead), toBossKit(opp, { role: this.role, wild: this.isWild, playerLevel: lead.level }), intro);
+    this.engine = new ActionEngine(toActionKit(lead), toBossKit(opp, { role: this.role, wild: this.isWild, playerLevel: lead.level, bossId: this.npc?.id }), intro);
     this.engine.isWildBattle = this.isWild;
     this.engine.p.hp = this.engine.p.hpShown = Math.max(1, Math.min(lead.hp, this.engine.p.maxHp));
 
@@ -253,7 +255,7 @@ export class ActionBattleScene extends Phaser.Scene {
         this.enemyIdx++;
         const next = this.enemyParty[this.enemyIdx];
         this.preloadSprite(SPECIES[next.speciesId].dexId);
-        eng.swapBoss(toBossKit(next, { role: this.role, wild: this.isWild, playerLevel: this.playerParty[this.playerIdx].level }), `${this.npc?.name ?? 'Foe'} sends out ${SPECIES[next.speciesId].name}!`);
+        eng.swapBoss(toBossKit(next, { role: this.role, wild: this.isWild, playerLevel: this.playerParty[this.playerIdx].level, bossId: this.npc?.id }), `${this.npc?.name ?? 'Foe'} sends out ${SPECIES[next.speciesId].name}!`);
       } else {
         this.finish(this.npc ? 'npc_win' : 'wild_win', { npcId: this.npc?.id, wildSpeciesId: defeated.speciesId });
       }

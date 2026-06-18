@@ -129,10 +129,21 @@ export interface BossKit {
   type2: string | null;
   level: number;        // for the intro card
   roleLabel: string;    // "Gym Leader" / "Wild" / "Trainer" … for the intro card
+  pattern: string;      // which authored move-pattern table the engine uses
   hpPool: number;       // scaled so the duel lasts (boss is a damage sponge vs your kit)
   maxPosture: number;
   atkBase: number;      // boss-move damage scales off this
   radius: number;       // body hit radius
+}
+
+// Authored bosses get a distinct pattern; everyone else falls back to a stat-derived
+// archetype so no two marquee fights play identically (PLAN: a learnable table per boss).
+const AUTHORED_BOSS = new Set(['brock', 'giovanni']);
+function pickPattern(s: { baseDef: number; baseSpd: number }, bossId?: string): string {
+  if (bossId && AUTHORED_BOSS.has(bossId)) return bossId;
+  if (s.baseDef >= 80) return 'tank';
+  if (s.baseSpd >= 75) return 'fast';
+  return 'generic';
 }
 
 const ROLE_LABEL: Partial<Record<RoleId, string>> = {
@@ -149,7 +160,7 @@ const ROLE_HP_MULT: Partial<Record<RoleId, number>> = {
   rocket_grunt: 2.2, trainer: 2.3, gym_challenger: 2.4, ranger: 2.4, wanderer: 2.1,
 };
 
-export function toBossKit(opponent: MonsterInstance, opts: { role?: RoleId; wild?: boolean; playerLevel?: number } = {}): BossKit {
+export function toBossKit(opponent: MonsterInstance, opts: { role?: RoleId; wild?: boolean; playerLevel?: number; bossId?: string } = {}): BossKit {
   const s = SPECIES[opponent.speciesId];
   const mult = opts.wild ? 1.2 : (opts.role ? (ROLE_HP_MULT[opts.role] ?? 2.4) : 2.4);
   // Couple to the player↔boss level gap so an over/under-leveled player still gets a
@@ -169,6 +180,7 @@ export function toBossKit(opponent: MonsterInstance, opts: { role?: RoleId; wild
     type2: s.type2,
     level: opponent.level,
     roleLabel: opts.wild ? 'Wild' : (opts.role ? (ROLE_LABEL[opts.role] ?? 'Trainer') : 'Trainer'),
+    pattern: pickPattern(s, opts.bossId),
     hpPool: Math.round(normHp * mult * lf),
     maxPosture: Math.round(80 + opponent.def * 0.6),
     atkBase: Math.round(opponent.atk * clamp(lf, 0.85, 1.4)),

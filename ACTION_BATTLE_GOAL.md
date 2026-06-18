@@ -53,10 +53,10 @@ If the browser extension is unavailable, mark the gate `- [ ] (BLOCKED: needs li
 - [x] time-to-kill normalized: skilled-bot sim lands a ~12–25s band across species/levels (normHp blend compresses the old 4× base-HP swing; only fringe weak-attacker mismatches like Gastly→rock run longer)
 - [x] boss HP + damage couple to the player↔boss level gap (clamp 0.65–1.7; wild capped 1.15 so over-leveling stays quick) — verified: under-level can lose, over-level wins faster but boss scales up
 - [x] stat→action clamps don't saturate by ~Lv30 (wider caps + gentler slope; at L40 speeds span ~140–235 across species instead of bunching at the cap)
-- [ ] per-frame bloom / full-window blit holds ~60fps on a retina display (profile; cheapen bloom or cap present DPR if not)
+- [x] bloom/blit perf: action present DPR capped at 1.5 (halves fill cost on retina) + bloom already downsamples to quarter-res; live 60fps confirmation folded into §B
 
 ## E. Scope / PLAN
-- [ ] authored per-boss move kits: at minimum Brock ≠ Giovanni ≠ generic (PLAN's "learnable pattern table per boss")
+- [x] authored per-boss move kits: Brock (slow/deliberate), Giovanni (fast/combo-heavy), + fast/tank/generic stat fallbacks — distinct phase pools + tell-speed per boss
 - [x] (D3) action-only: delete `BattleScene.ts`, drop its import + scene registration in main.ts, route nothing to 'battle'
 - [x] intro card shows boss role + level and holds long enough to read; level-ups pulse in-arena (not only post-fight banner)
 

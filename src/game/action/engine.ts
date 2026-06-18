@@ -27,6 +27,18 @@ interface BossMoveDef {
   reach?: number; len?: number; hw?: number; hh?: number; radius?: number; inner?: number; outer?: number;
 }
 
+// Per-boss authored pattern tables: which moves appear per phase, and a tell-speed
+// multiplier. Brock is slow + deliberate (tutorial gym), Giovanni fast + combo-heavy;
+// fast/tank/generic are stat-derived fallbacks so non-marquee fights still vary.
+interface BossPattern { pools: [string[], string[], string[]]; tellMult: number; }
+const BOSS_PATTERNS: Record<string, BossPattern> = {
+  generic: { pools: [['sweep', 'spear', 'slam'], ['sweep', 'spear', 'slam', 'ring'], ['sweep', 'spear', 'slam', 'ring', 'combo']], tellMult: 1.0 },
+  brock: { pools: [['slam', 'sweep'], ['slam', 'sweep', 'spear'], ['slam', 'sweep', 'spear', 'ring']], tellMult: 1.12 },
+  giovanni: { pools: [['sweep', 'combo'], ['sweep', 'combo', 'spear', 'slam'], ['combo', 'spear', 'slam', 'ring', 'sweep']], tellMult: 0.85 },
+  fast: { pools: [['sweep', 'combo'], ['sweep', 'combo', 'ring'], ['sweep', 'combo', 'ring', 'spear']], tellMult: 0.82 },
+  tank: { pools: [['slam', 'spear'], ['slam', 'spear', 'ring'], ['slam', 'spear', 'ring', 'combo']], tellMult: 1.08 },
+};
+
 const BOSS_MOVES: Record<string, BossMoveDef> = {
   sweep: { kind: 'sweep', name: 'Tail Sweep', tell: 700, active: 175, recover: 700, mult: 1.0, reach: 150 },
   spear: { kind: 'spear', name: 'Spear Line', tell: 800, active: 210, recover: 560, mult: 1.35, len: 760, hw: 46 },
@@ -59,7 +71,7 @@ export interface BossState {
   kit: BossKit;
   x: number; y: number; r: number;
   hp: number; maxHp: number; hpShown: number;
-  type1: string; type2: string | null; name: string; element: string; level: number; roleLabel: string;
+  type1: string; type2: string | null; name: string; element: string; level: number; roleLabel: string; pattern: string;
   face: number; posture: number; maxPosture: number; lastHit: number;
   state: 'idle' | 'tell' | 'active' | 'recover' | 'broken';
   timer: number; tellTotal: number; move: BossMoveDef | null;
@@ -85,7 +97,7 @@ function freshPlayer(kit: ActionKit): PlayerState {
 function freshBoss(kit: BossKit): BossState {
   return {
     kit, x: 650, y: 300, r: kit.radius, hp: kit.hpPool, maxHp: kit.hpPool, hpShown: kit.hpPool,
-    type1: kit.type1, type2: kit.type2, name: kit.name, element: kit.element, level: kit.level, roleLabel: kit.roleLabel,
+    type1: kit.type1, type2: kit.type2, name: kit.name, element: kit.element, level: kit.level, roleLabel: kit.roleLabel, pattern: kit.pattern,
     face: -1, posture: 0, maxPosture: kit.maxPosture, lastHit: 999,
     state: 'idle', timer: 1100, tellTotal: 1, move: null, target: { x: 0, y: 0 }, hit: false,
     phase: 1, broken: 0, flash: 0, atkBase: kit.atkBase,
@@ -323,13 +335,13 @@ export class ActionEngine {
     if ((b.state === 'idle' || b.state === 'recover') && b.lastHit > 700) b.posture = Math.max(0, b.posture - dt * 0.045);
     b.timer -= dt;
     if (b.state === 'idle' && b.timer <= 0) {
-      const close = hyp(p.x - b.x, p.y - b.y) < 175;
-      const pool = close ? ['sweep', 'combo', 'slam'] : ['spear', 'slam', 'sweep'];
-      if (b.phase >= 2) pool.push('ring');
-      if (b.phase >= 3) pool.push('combo', 'spear');
-      b.move = BOSS_MOVES[pool[Math.floor(Math.random() * pool.length)]];
+      const pat = BOSS_PATTERNS[b.pattern] ?? BOSS_PATTERNS.generic;
+      const pool = pat.pools[Math.min(2, b.phase - 1)];
+      const far = hyp(p.x - b.x, p.y - b.y) > 240;
+      if (far && pool.includes('spear') && Math.random() < 0.55) b.move = BOSS_MOVES.spear; // close the gap
+      else b.move = BOSS_MOVES[pool[Math.floor(Math.random() * pool.length)]];
       b.target = { x: p.x, y: p.y }; b.state = 'tell';
-      b.timer = b.move.tell * (b.phase === 3 ? 0.78 : b.phase === 2 ? 0.88 : 1); b.tellTotal = b.timer; b.hit = false;
+      b.timer = b.move.tell * pat.tellMult * (b.phase === 3 ? 0.85 : b.phase === 2 ? 0.92 : 1); b.tellTotal = b.timer; b.hit = false;
       this.log = 'Tell: ' + b.move.name + '.';
     } else if (b.state === 'tell' && b.timer <= 0) {
       b.state = 'active'; b.timer = b.move!.active; this.shake = 8;

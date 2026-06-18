@@ -6,6 +6,7 @@ import { ActionEngine, STAGE_W, STAGE_H } from './action/engine';
 import { BattleRenderer, type BattleAssets } from './action/render';
 import { toActionKit, toBossKit } from './action/kit';
 import { applyBattleOutcome, awardXp, catchChance, type BattleOutcome, type OutcomeCtx } from '../world/battleOutcome';
+import { GamepadPoller } from './gamepad';
 
 interface BattleData { kind: 'npc' | 'wild'; npcId?: string; wild?: MonsterInstance }
 const POTION_HEAL = 35;
@@ -34,6 +35,7 @@ export class ActionBattleScene extends Phaser.Scene {
   private dpr = 1;
   private sprites = new Map<number, HTMLImageElement>();
 
+  private pad = new GamepadPoller();
   private held = new Set<string>();
   private onKeyDown!: (e: KeyboardEvent) => void;
   private onKeyUp!: (e: KeyboardEvent) => void;
@@ -163,12 +165,27 @@ export class ActionBattleScene extends Phaser.Scene {
   update(time: number) {
     if (this.ended || !this.engine) return;
 
-    // movement vector from held keys
+    // movement vector from held keys, or the left stick / d-pad if a pad is connected
     const L = this.held.has('a') || this.held.has('arrowleft');
     const R = this.held.has('d') || this.held.has('arrowright');
     const U = this.held.has('w') || this.held.has('arrowup');
     const D = this.held.has('s') || this.held.has('arrowdown');
-    this.engine.setMove((R ? 1 : 0) - (L ? 1 : 0), (D ? 1 : 0) - (U ? 1 : 0));
+    let mx = (R ? 1 : 0) - (L ? 1 : 0), my = (D ? 1 : 0) - (U ? 1 : 0);
+    const pad = this.pad.poll();
+    if (pad.connected && (pad.mx || pad.my)) { mx = pad.mx; my = pad.my; }
+    this.engine.setMove(mx, my);
+    // pad action edges: A light · X heavy · B dodge · Y/LB/RB specials · RT heal · LT catch · Back flee
+    if (pad.connected) {
+      if (pad.A) this.engine.onPress('light');
+      if (pad.X) this.engine.onPress('heavy');
+      if (pad.B) this.engine.onPress('dodge');
+      if (pad.Y) this.engine.onPress('I');
+      if (pad.LB) this.engine.onPress('U');
+      if (pad.RB) this.engine.onPress('O');
+      if (pad.RT) this.tryHeal();
+      if (pad.LT && this.isWild) this.engine.onPress('catch');
+      if (pad.back && this.isWild) this.engine.onPress('flee');
+    }
     this.engine.potions = world.state.player.items.potion ?? 0;
 
     this.engine.step(time);

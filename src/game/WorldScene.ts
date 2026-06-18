@@ -11,6 +11,7 @@ import { runWorldTick } from '../llm/director';
 import { advanceStory, markTalk, objectiveLine, objectiveHint } from '../world/story';
 import { makeMonster, SPECIES } from '../world/monsters';
 import type { NPC } from '../world/types';
+import { GamepadPoller, type PadFrame } from './gamepad';
 
 // Main overworld scene: grid movement, NPC interaction, LLM dialogue with
 // choices, day ticks, wild encounters in tall grass, map transitions.
@@ -46,6 +47,12 @@ export class WorldScene extends Phaser.Scene {
   private dlgNpc: NPC | null = null;
   private dlgTurn: DialogueTurn | null = null;
   private dlgBusy = false;
+  private dlgSel = 0;
+  private dlgChoiceTexts: Phaser.GameObjects.Text[] = [];
+
+  // controller
+  private pad = new GamepadPoller();
+  private padNow: PadFrame = { connected: false, mx: 0, my: 0, A: false, B: false, X: false, Y: false, LB: false, RB: false, LT: false, RT: false, start: false, back: false, up: false, down: false, left: false, right: false };
 
   constructor() { super('world'); }
 
@@ -253,19 +260,21 @@ export class WorldScene extends Phaser.Scene {
 
   // ——— game loop ———
   update() {
+    const gp = this.pad.poll(); this.padNow = gp;
     if (this.shopBox) { this.updateShop(); return; }
     if (this.dlgBox) { this.updateDialogue(); return; }
     if (this.moving || this.ticking) return;
 
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) { this.tryInteract(); return; }
-    if (Phaser.Input.Keyboard.JustDown(this.keyT)) { this.endDay(); return; }
-    if (Phaser.Input.Keyboard.JustDown(this.keyJ)) { (window as any).showJournal?.(); return; }
+    // A = talk/interact · Y = journal · Back/Select = end day  (controller)
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace) || gp.A) { this.tryInteract(); return; }
+    if (Phaser.Input.Keyboard.JustDown(this.keyT) || gp.back) { this.endDay(); return; }
+    if (Phaser.Input.Keyboard.JustDown(this.keyJ) || gp.Y) { (window as any).showJournal?.(); return; }
 
     let dx = 0, dy = 0;
-    if (this.cursors.left.isDown || this.wasd.A.isDown) dx = -1;
-    else if (this.cursors.right.isDown || this.wasd.D.isDown) dx = 1;
-    else if (this.cursors.up.isDown || this.wasd.W.isDown) dy = -1;
-    else if (this.cursors.down.isDown || this.wasd.S.isDown) dy = 1;
+    if (this.cursors.left.isDown || this.wasd.A.isDown || gp.mx < -0.5) dx = -1;
+    else if (this.cursors.right.isDown || this.wasd.D.isDown || gp.mx > 0.5) dx = 1;
+    else if (this.cursors.up.isDown || this.wasd.W.isDown || gp.my < -0.5) dy = -1;
+    else if (this.cursors.down.isDown || this.wasd.S.isDown || gp.my > 0.5) dy = 1;
     if (!dx && !dy) return;
 
     // update facing (even when blocked — like the real games)
@@ -441,15 +450,18 @@ export class WorldScene extends Phaser.Scene {
       }));
     });
     c.add(this.add.text(8, H - 20, `Your money: ¥${world.state.player.money}`, { fontFamily: 'monospace', fontSize: '10px', color: '#8fe0a0' }));
-    c.add(this.add.text(W - 8, H - 20, '↑↓ select · SPACE buy · ESC leave', { fontFamily: 'monospace', fontSize: '9px', color: '#5d7890' }).setOrigin(1, 0));
+    c.add(this.add.text(W - 8, H - 20, '↑↓ select · SPACE/(A) buy · (B)/ESC leave', { fontFamily: 'monospace', fontSize: '9px', color: '#5d7890' }).setOrigin(1, 0));
     this.shopBox = c;
   }
 
   private updateShop() {
-    if (Phaser.Input.Keyboard.JustDown(this.shopKeys[0])) { this.shopSel = (this.shopSel + WorldScene.SHOP_ITEMS.length - 1) % WorldScene.SHOP_ITEMS.length; this.drawShop('What can I get you?'); }
-    else if (Phaser.Input.Keyboard.JustDown(this.shopKeys[1])) { this.shopSel = (this.shopSel + 1) % WorldScene.SHOP_ITEMS.length; this.drawShop('What can I get you?'); }
-    else if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.buyItem();
-    this.keys123.forEach((key, i) => { if (Phaser.Input.Keyboard.JustDown(key) && i < WorldScene.SHOP_ITEMS.length) { this.shopSel = i; this.buyItem(); } });
+    const gp = this.padNow;
+    const n = WorldScene.SHOP_ITEMS.length;
+    if (gp.B) { this.closeShop(); return; }   // B leaves the shop
+    if (Phaser.Input.Keyboard.JustDown(this.shopKeys[0]) || gp.up) { this.shopSel = (this.shopSel + n - 1) % n; this.drawShop('What can I get you?'); }
+    else if (Phaser.Input.Keyboard.JustDown(this.shopKeys[1]) || gp.down) { this.shopSel = (this.shopSel + 1) % n; this.drawShop('What can I get you?'); }
+    else if (Phaser.Input.Keyboard.JustDown(this.keySpace) || gp.A) this.buyItem();
+    this.keys123.forEach((key, i) => { if (Phaser.Input.Keyboard.JustDown(key) && i < n) { this.shopSel = i; this.buyItem(); } });
   }
 
   private buyItem() {
@@ -518,9 +530,13 @@ export class WorldScene extends Phaser.Scene {
     c.add(npcTxt);
     let y = PAD + npcTxt.height + GAP;
     choiceTexts.forEach(t => { t.setPosition(PAD + 4, y); c.add(t); y += t.height + 4; });
+    // track choices for controller navigation + highlight the first one each new turn
+    this.dlgChoiceTexts = choiceTexts;
+    this.dlgSel = 0;
+    this.highlightDlg();
 
     if (hint) {
-      c.add(this.add.text(W - PAD, H - 15, choices.length ? '[SPACE] leave' : '[SPACE] close', {
+      c.add(this.add.text(W - PAD, H - 15, choices.length ? '1-3 or (A) pick · (B) leave' : 'SPACE/(A) close', {
         fontFamily: 'monospace', fontSize: '9px', color: '#5d7890',
       }).setOrigin(1, 0));
     }
@@ -529,12 +545,22 @@ export class WorldScene extends Phaser.Scene {
 
   private updateDialogue() {
     if (this.dlgBusy) return;
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
-      this.closeDialogue(); return;
-    }
+    const gp = this.padNow;
+    const n = this.dlgChoiceTexts.length;
+    // B / SPACE = leave or close
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace) || gp.B) { this.closeDialogue(); return; }
+    if (n) {
+      if (gp.up) { this.dlgSel = (this.dlgSel - 1 + n) % n; this.highlightDlg(); }
+      if (gp.down) { this.dlgSel = (this.dlgSel + 1) % n; this.highlightDlg(); }
+      if (gp.A) { this.pickChoice(this.dlgSel); return; }
+    } else if (gp.A) { this.closeDialogue(); return; }
     this.keys123.forEach((key, i) => {
       if (Phaser.Input.Keyboard.JustDown(key)) this.pickChoice(i);
     });
+  }
+
+  private highlightDlg() {
+    this.dlgChoiceTexts.forEach((t, i) => t.setColor(i === this.dlgSel ? '#ffe9a0' : '#9fd4ff'));
   }
 
   private async pickChoice(i: number) {

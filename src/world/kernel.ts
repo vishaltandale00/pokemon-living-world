@@ -21,7 +21,7 @@
 // structural ops land in the next steps; this file is the evaluator core and
 // the non-geometric effects.)
 import type { WorldState, KernelState } from './types';
-import type { Entity, Ref, Predicate, Effect, Rule } from './entity';
+import type { Entity, Ref, Predicate, Effect, Rule, StructuralOps } from './entity';
 import { hasTag, addTag, removeTag } from './entity';
 
 export type { Ref, Predicate, Effect, Rule } from './entity';
@@ -120,7 +120,7 @@ function capWrite(state: WorldState, entityId: string, channel: string, delta: n
 }
 
 // ——— effect application (non-threshold path: applied after the eval pass) ———
-interface ApplyCtx { state: WorldState; each: string | null; fromThreshold: boolean; protectedIds: Set<string>; }
+interface ApplyCtx { state: WorldState; each: string | null; fromThreshold: boolean; protectedIds: Set<string>; ops?: StructuralOps; }
 function applyEffect(eff: Effect, ctx: ApplyCtx): void {
   const { state, each } = ctx;
   const ent = (ref: Ref) => { const id = resolveId(ref, each); return id ? state.entities[id] ?? null : null; };
@@ -182,17 +182,22 @@ function applyEffect(eff: Effect, ctx: ApplyCtx): void {
       state.entities[eff.id] = { id: eff.id, type: eff.entityType, tags: [...new Set(eff.tags)].sort(), attrs: { ...eff.attrs }, magnitude: 0, relations: rels, thresholds: [] };
       return;
     }
+    // ——— geometric structural ops (self-validating; no-op if ops not injected) ———
+    case 'placeBuildingValidly': { ctx.ops?.placeBuildingValidly(state, eff.map, eff.kind, eff.owner, eff.name); return; }
+    case 'createLocation': { ctx.ops?.createLocation(state, eff.newMapId, eff.seedMap, eff.biome, eff.tags, eff.name); return; }
+    case 'wireConnection': { ctx.ops?.wireConnection(state, eff.fromMap, eff.fromX, eff.fromY, eff.toMap, eff.toX, eff.toY); return; }
   }
 }
 
 export interface KernelTickLog { firedRules: string[]; crossings: { id: string; channel: string; level: number; dir: 'up' | 'down' }[]; }
-export interface TickOpts { protectedIds?: Set<string>; }
+export interface TickOpts { protectedIds?: Set<string>; ops?: StructuralOps; }
 
 // ——— the tick ———
 // Advances the kernel ONE day. The caller owns state.day; this reads it.
 export function runKernelTick(state: WorldState, rules: Rule[], opts: TickOpts = {}): KernelTickLog {
   const k: KernelState = state.kernel;
   const protectedIds = opts.protectedIds ?? new Set<string>();
+  const ops = opts.ops;
   // new day -> fresh velocity budget
   if (k.channelDay !== state.day) { k.channelDay = state.day; k.channelUsed = {}; }
 
@@ -219,7 +224,7 @@ export function runKernelTick(state: WorldState, rules: Rule[], opts: TickOpts =
     for (const each of bindings) {
       if (!evalPredicate(snap, rule.when, each)) continue;
       didFire = true;
-      for (const eff of rule.then) applyEffect(eff, { state, each, fromThreshold: false, protectedIds });
+      for (const eff of rule.then) applyEffect(eff, { state, each, fromThreshold: false, protectedIds, ops });
     }
     if (didFire) { k.lastFired[rule.id] = state.day; fired.push(rule.id); }
   }
@@ -238,10 +243,10 @@ export function runKernelTick(state: WorldState, rules: Rule[], opts: TickOpts =
       if (after > before) {
         // highest level strictly crossed upward (>= after-side, > before-side)
         const crossed = levels.filter(t => before < t.level && after >= t.level).sort((a, b) => b.level - a.level)[0];
-        if (crossed) { crossings.push({ id: e.id, channel: ch, level: crossed.level, dir: 'up' }); for (const eff of crossed.up) applyEffect(eff, { state, each: e.id, fromThreshold: true, protectedIds }); }
+        if (crossed) { crossings.push({ id: e.id, channel: ch, level: crossed.level, dir: 'up' }); for (const eff of crossed.up) applyEffect(eff, { state, each: e.id, fromThreshold: true, protectedIds, ops }); }
       } else {
         const crossed = levels.filter(t => after < t.level && before >= t.level).sort((a, b) => a.level - b.level)[0];
-        if (crossed) { crossings.push({ id: e.id, channel: ch, level: crossed.level, dir: 'down' }); for (const eff of crossed.down) applyEffect(eff, { state, each: e.id, fromThreshold: true, protectedIds }); }
+        if (crossed) { crossings.push({ id: e.id, channel: ch, level: crossed.level, dir: 'down' }); for (const eff of crossed.down) applyEffect(eff, { state, each: e.id, fromThreshold: true, protectedIds, ops }); }
       }
     }
   }

@@ -55,7 +55,19 @@ export type Effect =
   | { t: 'logEvent'; key: string }
   | { t: 'retireEntity'; e: Ref }
   | { t: 'spawnEntity'; id: string; entityType: string; tags: string[]; attrs: Record<string, number | string | boolean>; atLocation?: string }
-  | { t: 'transferControl'; e: Ref; toFaction: string };
+  | { t: 'transferControl'; e: Ref; toFaction: string }
+  // ——— geometric structural ops (P3): self-validating, fail atomically ———
+  | { t: 'placeBuildingValidly'; map: string; kind: string; owner: string; name: string }
+  | { t: 'createLocation'; newMapId: string; seedMap: string; biome: string; tags: string[]; name: string }
+  | { t: 'wireConnection'; fromMap: string; fromX: number; fromY: number; toMap: string; toX: number; toY: number };
+
+// The geometric ops are injected into the tick (kernel.ts stays decoupled from
+// the renderer). Each returns whether it applied; each self-validates.
+export interface StructuralOps {
+  placeBuildingValidly(state: WorldState, map: string, kind: string, owner: string, name: string): boolean;
+  createLocation(state: WorldState, newMapId: string, seedMap: string, biome: string, tags: string[], name: string): boolean;
+  wireConnection(state: WorldState, fromMap: string, fromX: number, fromY: number, toMap: string, toX: number, toY: number): boolean;
+}
 
 // Authored threshold ladder on a channel; fired by the two-phase tick.
 export interface Threshold {

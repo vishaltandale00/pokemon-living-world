@@ -4,6 +4,7 @@
 // `window.__kernelCheck()`. Pure/detached — never touches localStorage.
 import { createSeedWorld } from './seed';
 import { runKernelTick, DEFAULT_CAP, type Rule } from './kernel';
+import { structuralOps } from './structuralOps';
 import type { WorldState } from './types';
 import type { Entity } from './entity';
 import { hasTag } from './entity';
@@ -142,11 +143,39 @@ function testProtectedSet() {
   check('protected-set: unprotected retire still works (not over-blocking)', hasTag(s2.entities['npc:giovanni'], '__retired'), '');
 }
 
+// 8) GEOMETRIC STRUCTURAL OPS: place a building (reachable), calve a location,
+// wire a road — all through the kernel, all self-validating + deterministic.
+function geomRules(): Rule[] {
+  return [
+    { id: 'a_build', when: { t: 'exists', id: 'town:pewter' }, then: [{ t: 'placeBuildingValidly', map: 'pewter', kind: 'hideout', owner: 'rocket', name: 'Den' }], throttleDays: 0 },
+    { id: 'b_calve', when: { t: 'exists', id: 'town:pewter' }, then: [{ t: 'createLocation', newMapId: 'compound', seedMap: 'pewter', biome: 'urban', tags: ['player_holdfast'], name: 'The Compound' }], throttleDays: 0 },
+    { id: 'c_road', when: { t: 'exists', id: 'town:pewter' }, then: [{ t: 'wireConnection', fromMap: 'compound', fromX: 12, fromY: 18, toMap: 'pewter', toX: 12, toY: 1 }], throttleDays: 0 },
+  ];
+}
+function testGeometry() {
+  const s = createSeedWorld(3);            // seed entities intact (town:pewter exists)
+  const before = Object.keys(s.buildings).length;
+  runKernelTick(s, geomRules(), { ops: structuralOps });
+  const newBlds = Object.values(s.buildings).filter(b => b.map === 'pewter' && b.name === 'Den');
+  const placed = Object.keys(s.buildings).length === before + 1 && newBlds.length === 1
+    && !!s.entities[`bld:${newBlds[0]?.id}`];
+  check('geometry: placeBuildingValidly adds one reachable building + entity', placed, `count ${before}->${Object.keys(s.buildings).length}`);
+  const calved = !!s.mapLayouts['compound'] && !!s.towns['compound'] && !!s.entities['town:compound'];
+  check('geometry: createLocation registers a renderable, entity-backed node', calved, '');
+  const wired = s.connections.some(c => c.fromMap === 'compound' && c.toMap === 'pewter')
+    && s.connections.some(c => c.fromMap === 'pewter' && c.toMap === 'compound');
+  check('geometry: wireConnection lays a bidirectional link', wired, `conns=${s.connections.length}`);
+  // determinism of the geometric path (seeded placement)
+  const a = createSeedWorld(9); runKernelTick(a, geomRules(), { ops: structuralOps });
+  const b = createSeedWorld(9); runKernelTick(b, geomRules(), { ops: structuralOps });
+  check('geometry: deterministic placement/calving/wiring', JSON.stringify(a.buildings) === JSON.stringify(b.buildings) && JSON.stringify(a.mapLayouts) === JSON.stringify(b.mapLayouts) && JSON.stringify(a.connections) === JSON.stringify(b.connections), '');
+}
+
 export interface KernelCheckResult { ok: boolean; checks: Check[] }
 export function runKernelCheck(): KernelCheckResult {
   checks.length = 0;
   testVelocityCap(); testCascadeBlocked(); testOneCrossPerTick();
-  testAccretionAndDecay(); testDeterminism(); testTermination(); testProtectedSet();
+  testAccretionAndDecay(); testDeterminism(); testTermination(); testProtectedSet(); testGeometry();
   const ok = checks.every(c => c.pass);
   // eslint-disable-next-line no-console
   console.log('[kernel] ' + (ok ? 'ALL PASS' : 'FAIL') + '\n' + checks.map(c => `${c.pass ? '✓' : '✗'} ${c.name}${c.pass ? '' : ' — ' + c.detail}`).join('\n'));

@@ -128,12 +128,23 @@ export interface MapData {
 }
 
 // the overworld tile the player stands on just below a building's door
-function buildingDoor(b: Building): { doorX: number; doorY: number } {
+export function buildingDoor(b: Building): { doorX: number; doorY: number } {
   const tpl = TEMPLATES[b.kind] ?? TEMPLATES.house;
   const rows = b.condition === 'ruined' ? ruinFrames(b.w, b.h) : tpl.rows.slice(-b.h);
   const doorX = Math.min(b.x + tpl.door, MAP_W - 2);
   const doorY = Math.min(b.y + Math.min(b.h, rows.length) - 1, MAP_H - 2);
   return { doorX, doorY };
+}
+
+// Base logical tiles for an overworld map (terrain only, before buildings/exits).
+// Phaser-free — used by the structural ops for collision/reachability.
+export function baseTiles(mapId: string): number[][] {
+  const layout = LAYOUTS[mapId] ?? world.state.mapLayouts?.[mapId] ?? LAYOUTS.route1;
+  return layout.map(row => {
+    const out: number[] = [];
+    for (let x = 0; x < MAP_W; x++) out.push(CHAR_TILE[row[x] ?? '.'] ?? T.GRASS);
+    return out;
+  });
 }
 
 export function buildMap(mapId: string): MapData {

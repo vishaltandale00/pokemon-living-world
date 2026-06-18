@@ -103,6 +103,8 @@ the anti-cheat, termination, and determinism guarantees do not hold.
    - **Protected set:** the entities/slots referenced by any *unsatisfied* story-chapter predicate.
      `retireEntity` / `transferControl` / `vacate_slot` **fail atomically** if their target is in it.
      *(No story softlock — and remember determinism would otherwise cement a softlock forever.)*
+     The gating flags (`beat_<npc>`) and slot claims are set in `battleOutcome.ts:applyBattleOutcome`,
+     so the protected set is computed from chapter predicates over those flags/slots.
    - **Global reachability:** after any `placeBuildingValidly` / `createLocation` / `wireConnection`,
      run one BFS over all doors from the player's node; **reject the op** if any required node/door
      became unreachable. *(No spatial orphan or walling-in.)*
@@ -114,7 +116,12 @@ scoped `countMatching`, computed-delta effects for true contagion, `setTag` inte
 
 ## 4. Locked decisions & constraints
 
-- **Battles** stay a fixed 2-party Pokémon fight (the souls-like is a separate experiment, out of scope).
+- **Battles** are now **real-time action combat** (`src/game/action/{engine,kit,render}.ts` +
+  `ActionBattleScene`) — main merged it as the battle system for all encounters (commit `08ad54e`).
+  It is **out of scope for the kernel**: the world sim consumes battle *outcomes only*, through the
+  already-deterministic `src/world/battleOutcome.ts` seam — `applyBattleOutcome(outcome, ctx)` →
+  badges / money / rep / XP / catch / role-slot claim; a loss takes no penalty (team heals, wake at
+  the nearest town). The old menu `BattleScene.ts` is now dead code (no longer launched).
 - **Power can be social**, not battle-won. Anti-cheat is the capped accretion path + reversibility,
   NOT anchoring power to battle wins.
 - **Override is allowed** (the player can do almost anything) — which is *why* the softlock guarantee
@@ -124,8 +131,12 @@ scoped `countMatching`, computed-delta effects for true contagion, `setTag` inte
 - **Real FRLG assets only — no new art.** Generated places compose existing tiles + building kinds
   {center,mart,gym,house,hideout,lab,tower} + pre-rendered interior PNGs. The LLM picks *kinds*, never pixels.
 - **Local-only.** localStorage save. **The API key is set by the user in-game; never handle it in code or logs.**
-- **Determinism:** same seed + same `act()` sequence ⇒ byte-identical save; a half-grown consequence
-  reloads identically. No `Date.now()` / `Math.random()` in anything that reaches a save.
+- **Determinism is a property of the WORLD-SIM layer** (kernel ticks, accretion, rules, structural
+  ops, Director, dialogue effects, store mutations, encounter selection): same seed + same `act()`
+  sequence ⇒ byte-identical save; a half-grown consequence reloads identically; no `Date.now()` /
+  `Math.random()` reaches a save. The **real-time battle is explicitly EXCLUDED** from replay
+  determinism (it is reflex/frame-driven and uses RNG for AI/FX); its only contract is that
+  `battleOutcome.ts` applies a *given* outcome deterministically — which it already does.
 - **The seed game must keep working** at every step (it is the product; the engine extends it).
 
 ---
@@ -133,9 +144,12 @@ scoped `countMatching`, computed-delta effects for true contagion, `setTag` inte
 ## 5. Build order (each phase: deliverable + acceptance gate)
 
 **P0 — Determinism** *(no-regret; lands on `main` too; also fatal-fix #3)*
-Seeded RNG with per-op sub-streams; remove `Date.now`/`Math.random` from `store.ts`/placement/encounters;
-fixed-point integer channels; canonical save codec. **Accept:** same seed + scripted actions → byte-identical
-save twice; save→load→re-serialize is identical.
+Seeded RNG with per-op sub-streams; fixed-point integer channels; canonical save codec. Concrete
+save-reaching nondeterminism to remove (verified post-rebase): `store.ts` — `Date.now()` in the
+offer id + building id, `Math.random()` in building-placement target/x/y; `WorldScene` — `Math.random()`
+in the wild-encounter trigger (0.12) + species + level pick. `battleOutcome.ts` is already clean; the
+real-time fight (`action/*`, `ActionBattleScene`) is out of scope. **Accept:** same seed + scripted
+actions → byte-identical save twice; save→load→re-serialize is identical.
 
 **P1 — Entity registry** — the backing `Entity` substrate; `Building`/`Town`/`NPC` project from it.
 **Accept:** existing seed game renders and plays unchanged, now driven through projected entities.
@@ -152,7 +166,10 @@ adversarial attacks (cascade-mint, story-softlock, spatial-orphan, determinism-d
 a location calved, and a road wired at runtime all render, are walkable, and round-trip a reload.
 
 **P4 — Harness + recorder** — `window.harness = {observe, act, snapshot, renderAt}`; `act()` maps 1:1
-to the 3 triggers; snapshot after each `endDay` + each threshold cross = `world.state` clone +
+to the 3 triggers, **plus a battle-resolution action** (`resolveBattle`) — an automated policy can't
+play the real-time fight, so it supplies or auto-computes an outcome and calls `applyBattleOutcome`
+(this is the deterministic battle seam for the sim); snapshot after each `endDay` + each threshold
+cross = `world.state` clone +
 event-log tail + canvas PNG; non-spatial render panels (faction grip-map, rivalry standing); the
 mechanical invariants run per snapshot; the LLM-judge scores the sequence; output strips + contact
 sheet. **Accept:** a scripted multi-day run produces a snapshot timeline with all invariants green

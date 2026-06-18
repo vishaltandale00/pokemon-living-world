@@ -26,6 +26,8 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SPRITES = join(HERE, '..', 'public', 'sprites');
@@ -112,10 +114,21 @@ async function genGemini({ prompt, refPath }) {
   return Buffer.from((part.inline_data || part.inlineData).data, 'base64');
 }
 
+// Kontext edits at the INPUT resolution; our source sprites are ~96px, so upscale the
+// reference to ~1024 first (sips, macOS) — otherwise the output is a tiny blurry blob.
+function bigRef(refPath, size = 1024) {
+  try {
+    const out = join(tmpdir(), `ds_ref_${size}.png`);
+    execFileSync('sips', ['-Z', String(size), refPath, '--out', out], { stdio: 'ignore' });
+    return out;
+  } catch { return refPath; }
+}
+const dataUri = (p) => `data:image/png;base64,${readFileSync(p).toString('base64')}`;
+
 // FLUX.1 Kontext on Replicate — open edit model, no IP filter (safety checker = NSFW-only, disabled here)
 async function genReplicate({ prompt, refPath }) {
   const input = { prompt, output_format: 'png', disable_safety_checker: true };
-  if (refPath) { input.input_image = `data:image/png;base64,${readFileSync(refPath).toString('base64')}`; input.aspect_ratio = 'match_input_image'; }
+  if (refPath) { input.input_image = dataUri(bigRef(refPath)); input.aspect_ratio = 'match_input_image'; }
   const res = await fetch(`https://api.replicate.com/v1/models/${REPLICATE_MODEL}/predictions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${REPLICATE_TOKEN}`, 'Content-Type': 'application/json', Prefer: 'wait' },
@@ -135,7 +148,7 @@ async function genReplicate({ prompt, refPath }) {
 // FLUX.1 Kontext on fal.ai — same open model
 async function genFal({ prompt, refPath }) {
   const body = { prompt, enable_safety_checker: false, output_format: 'png' };
-  if (refPath) body.image_url = `data:image/png;base64,${readFileSync(refPath).toString('base64')}`;
+  if (refPath) body.image_url = dataUri(bigRef(refPath));
   const res = await fetch(`https://fal.run/${FAL_MODEL}`, {
     method: 'POST',
     headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },

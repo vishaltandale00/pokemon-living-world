@@ -93,7 +93,8 @@ ${playerSaid ? `The player just said/chose: "${playerSaid}"` : 'The player appro
 Respond as ${npc.name} with your line and the player's choices.`;
 
   try {
-    const turn = await chatJSON<DialogueTurn>(system, user, 'dialogue_turn', DIALOGUE_SCHEMA as unknown as Record<string, unknown>);
+    // real-time conversation runs on the FAST tier (falls back to the smart model if unset)
+    const turn = await chatJSON<DialogueTurn>(system, user, 'dialogue_turn', DIALOGUE_SCHEMA as unknown as Record<string, unknown>, 900, 'fast');
     // sanitize + keep lengths bounded so the dialogue box stays readable
     turn.choices = (turn.choices ?? []).slice(0, 3).map(c => ({
       label: clip(String(c.label), 64),

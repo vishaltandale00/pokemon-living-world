@@ -27,6 +27,7 @@ const journalOverlay = $('journal-overlay');
 const inBase = $('cfg-base') as HTMLInputElement;
 const inKey = $('cfg-key') as HTMLInputElement;
 const inModel = $('cfg-model') as HTMLInputElement;
+const inFast = $('cfg-fast-model') as HTMLInputElement;
 const status = $('llm-status');
 
 function openSettings() {
@@ -34,6 +35,7 @@ function openSettings() {
   inBase.value = cfg.baseUrl;
   inKey.value = cfg.apiKey;
   inModel.value = cfg.model;
+  inFast.value = cfg.fastModel;
   status.textContent = cfg.apiKey ? 'Key saved. Test to verify.' : 'No key — running on fallback rule engine.';
   status.className = cfg.apiKey ? 'ok' : 'bad';
   overlay.classList.add('open');
@@ -53,12 +55,12 @@ function enableGameKeys() {
 }
 
 $('cfg-save').onclick = () => {
-  setConfig({ baseUrl: inBase.value.trim() || 'https://openrouter.ai/api/v1', apiKey: inKey.value.trim(), model: inModel.value.trim() || 'openai/gpt-5.5' });
+  setConfig({ baseUrl: inBase.value.trim() || 'https://openrouter.ai/api/v1', apiKey: inKey.value.trim(), model: inModel.value.trim() || 'openai/gpt-5.5', fastModel: inFast.value.trim() });
   status.textContent = 'Saved.';
   status.className = 'ok';
 };
 $('cfg-test').onclick = async () => {
-  setConfig({ baseUrl: inBase.value.trim() || 'https://openrouter.ai/api/v1', apiKey: inKey.value.trim(), model: inModel.value.trim() || 'openai/gpt-5.5' });
+  setConfig({ baseUrl: inBase.value.trim() || 'https://openrouter.ai/api/v1', apiKey: inKey.value.trim(), model: inModel.value.trim() || 'openai/gpt-5.5', fastModel: inFast.value.trim() });
   status.textContent = 'Testing...';
   status.className = '';
   const r = await testConnection();

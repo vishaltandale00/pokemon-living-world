@@ -4,17 +4,21 @@
 export interface LLMConfig {
   baseUrl: string;
   apiKey: string;
-  model: string;
+  model: string;       // SMART tier: nightly world-load (Director), bundle authoring, the eval judge
+  fastModel: string;   // FAST tier: real-time NPC dialogue (empty -> reuses `model`)
 }
 
+export type ModelTier = 'smart' | 'fast';
+
 const CFG_KEY = 'living-kanto-llm-cfg';
+const DEFAULTS: LLMConfig = { baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: 'openai/gpt-5.5', fastModel: '' };
 
 export function getConfig(): LLMConfig {
   try {
     const raw = localStorage.getItem(CFG_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };   // backfill new fields on older saves
   } catch { /* fall through */ }
-  return { baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: 'openai/gpt-5.5' };
+  return { ...DEFAULTS };
 }
 
 export function setConfig(cfg: LLMConfig) {
@@ -29,14 +33,16 @@ export async function chatJSON<T>(
   schemaName: string,
   schema: Record<string, unknown>,
   maxTokens = 900,
+  tier: ModelTier = 'smart',
 ): Promise<T> {
   const cfg = getConfig();
   if (!cfg.apiKey) throw new Error('no-key');
+  const model = tier === 'fast' ? (cfg.fastModel.trim() || cfg.model) : cfg.model;
   const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
     body: JSON.stringify({
-      model: cfg.model,
+      model,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
@@ -52,7 +58,7 @@ export async function chatJSON<T>(
     const body = await res.text().catch(() => '');
     // Some OpenAI-compatible servers don't support json_schema; retry with json_object
     if (res.status === 400 && /json_schema|response_format/i.test(body)) {
-      return chatJSONFallbackMode<T>(system, user, maxTokens);
+      return chatJSONFallbackMode<T>(system, user, maxTokens, model);
     }
     throw new Error(`LLM HTTP ${res.status}: ${body.slice(0, 200)}`);
   }
@@ -61,13 +67,13 @@ export async function chatJSON<T>(
   return JSON.parse(text) as T;
 }
 
-async function chatJSONFallbackMode<T>(system: string, user: string, maxTokens: number): Promise<T> {
+async function chatJSONFallbackMode<T>(system: string, user: string, maxTokens: number, model: string): Promise<T> {
   const cfg = getConfig();
   const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
     body: JSON.stringify({
-      model: cfg.model,
+      model,
       messages: [
         { role: 'system', content: system + '\nRespond ONLY with valid JSON matching the requested shape.' },
         { role: 'user', content: user },

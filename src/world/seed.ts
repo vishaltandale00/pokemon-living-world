@@ -1,6 +1,7 @@
 import type { WorldState, NPC, RoleSlot, Building, TownState } from './types';
 import { makeMonster } from './monsters';
 import { buildEntitiesFromWorld } from './entity';
+import { generateKanto } from './kantoGen';
 
 // Seed world: Viridian City + Route 1 + Pewter City (real Kanto).
 // Everything here is DATA — the world mutates from day one via the director
@@ -23,8 +24,8 @@ export function createSeedWorld(seed = 1): WorldState {
     x: 17, y: 19, map: 'int:viridian_gym', sprite: 1, attitude: -10,
     personality: 'Viridian Gym Leader, ground-type specialist. Publicly a respected pillar of the League; secretly the boss of Team Rocket. Calculating, charismatic, always evaluating whether people are useful to him. Never admits his Rocket ties unless the player has proven deep loyalty to the organization.',
     party: [makeMonster('geodude', 12), makeMonster('onix', 11)] }));
-  add(npc({ id: 'oak', name: 'Prof. Oak', faction: 'rangers', role: 'legend_hunter', town: 'viridian',
-    x: 6, y: 9, map: 'int:viridian_lab', sprite: 2, attitude: 10,
+  add(npc({ id: 'oak', name: 'Prof. Oak', faction: 'rangers', role: 'legend_hunter', town: 'pallet',
+    x: 3, y: 8, map: 'pallet', sprite: 2, attitude: 10,
     personality: 'The legendary Pokémon professor, working in his Viridian field lab. Obsessed lately with reports of Lugia sighted over the northern peaks. Warm, encouraging, trusts anyone who shows genuine curiosity about Pokémon.' }));
   add(npc({ id: 'blue', name: 'Blue', faction: 'townsfolk', role: 'trainer', town: 'viridian',
     x: 10, y: 6, map: 'viridian', sprite: 3,
@@ -99,7 +100,7 @@ export function createSeedWorld(seed = 1): WorldState {
   const state: WorldState = {
     day: 1,
     player: {
-      name: 'You', x: 10, y: 16, map: 'viridian',
+      name: 'You', x: 10, y: 12, map: 'pallet',
       roles: ['trainer'], badges: 0, money: 500,
       reputation: { league: 0, rocket: 0, civic: 0, research: 0 },
       party: [makeMonster('charmander', 8)],
@@ -112,7 +113,7 @@ export function createSeedWorld(seed = 1): WorldState {
     rng: { seed, cursors: {} },
     idSeq: {},
     events: [
-      { day: 0, kind: 'world_news', summary: 'A new trainer arrived in Viridian City with a single Charmander.' },
+      { day: 0, kind: 'world_news', summary: 'A new trainer set out from Pallet Town with a single Charmander.' },
     ],
     rumors: [
       'They say a great silver bird flies over the northern peaks at dawn — Lugia, if you believe old Oak.',
@@ -126,7 +127,10 @@ export function createSeedWorld(seed = 1): WorldState {
     mapLayouts: {},
     rules: [],
   };
-  // P1a: derive the kernel Entity substrate from the seed structs.
+  // Build the rest of canonical Kanto (all towns/routes/dungeons/gyms beyond the
+  // hand-authored core) from the kanto.ts graph, then derive the kernel Entity
+  // substrate from the full world.
+  generateKanto(state);
   state.entities = buildEntitiesFromWorld(state);
   return state;
 }

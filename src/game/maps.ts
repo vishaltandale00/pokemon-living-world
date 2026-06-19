@@ -158,28 +158,21 @@ export function buildMap(mapId: string): MapData {
     return out;
   });
 
-  // exits: viridian(top) <-> route1 <-> pewter (2-wide road spine)
-  const spineX = 10;
+  // All inter-map exits are data-driven now (world.connections): the canonical
+  // Kanto graph (kanto.ts/kantoGen.ts) and any roads the emergent engine lays.
   const exits: MapData['exits'] = [];
   const addExit = (x: number, y: number, toMap: string, toX: number, toY: number) => {
     tiles[y][x] = T.PATH;
     exits.push({ x, y, toMap, toX, toY });
   };
-  if (mapId === 'viridian') {
-    addExit(spineX, 0, 'route1', spineX, MAP_H - 2);
-    addExit(spineX + 1, 0, 'route1', spineX + 1, MAP_H - 2);
-  } else if (mapId === 'route1') {
-    addExit(spineX, MAP_H - 1, 'viridian', spineX, 1);
-    addExit(spineX + 1, MAP_H - 1, 'viridian', spineX + 1, 1);
-    addExit(spineX, 0, 'pewter', spineX, MAP_H - 2);
-    addExit(spineX + 1, 0, 'pewter', spineX + 1, MAP_H - 2);
-  } else if (mapId === 'pewter') {
-    addExit(spineX, MAP_H - 1, 'route1', spineX, 1);
-    addExit(spineX + 1, MAP_H - 1, 'route1', spineX + 1, 1);
-  }
 
-  // P3: merge persisted connections (roads wireConnection laid) for this map, so
-  // generated links are walkable and survive a reload.
+  // merge persisted connections for this map, so links are walkable + reload-safe
+  for (const c of world.state.connections ?? []) {
+    if (c.fromMap !== mapId) continue;
+    if (c.fromY >= 0 && c.fromY < MAP_H && c.fromX >= 0 && c.fromX < MAP_W) {
+      addExit(c.fromX, c.fromY, c.toMap, c.toX, c.toY);
+    }
+  }
   for (const c of world.state.connections ?? []) {
     if (c.fromMap !== mapId) continue;
     if (c.fromY >= 0 && c.fromY < MAP_H && c.fromX >= 0 && c.fromX < MAP_W) {

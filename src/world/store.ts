@@ -62,6 +62,17 @@ export class WorldStore {
           n.map = fn.map; n.x = fn.x; n.y = fn.y;
         }
       }
+      // graft canonical Kanto onto pre-Kanto saves (the hardcoded route spine was
+      // removed, so old saves need the full connection graph or they'd be trapped).
+      // Preserves player progress; only ADDS missing places/links.
+      if (!state.towns.pallet) {
+        for (const [id, t] of Object.entries(fresh.towns)) state.towns[id] ??= t;
+        for (const [id, b] of Object.entries(fresh.buildings)) state.buildings[id] ??= b;
+        for (const [id, sl] of Object.entries(fresh.slots)) state.slots[id] ??= sl;
+        Object.assign(state.mapLayouts, fresh.mapLayouts);
+        if (!state.connections.length) state.connections = fresh.connections;
+        state.entities = buildEntitiesFromWorld(state);
+      }
       return state;
     } catch { return null; }
   }

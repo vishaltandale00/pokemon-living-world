@@ -1,5 +1,6 @@
 # dependencies & build output
 node_modules/
+node_modules
 dist/
 
 # local tooling / session state
